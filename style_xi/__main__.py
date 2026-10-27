@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .acquire import Downloader
 from .pipeline import import_cache
+from .profiles import profile_file, readable_summary
 from .runner import read_plan, run_plan
 from .storage import DataError
 
@@ -17,6 +18,9 @@ def main(argv=None):
     importer = commands.add_parser("import-cache", help="Normalize cached envelopes; no network")
     importer.add_argument("--input", type=Path, required=True)
     importer.add_argument("--output", type=Path, required=True)
+    profiles = commands.add_parser("profiles", help="Build explainable profiles from an offline import result")
+    profiles.add_argument("--input", type=Path, required=True)
+    profiles.add_argument("--output", type=Path, required=True)
     acquire = commands.add_parser("acquire", help="Inspect or run a bounded explicit request plan")
     acquire.add_argument("--plan", type=Path, required=True)
     acquire.add_argument("--state", type=Path, required=True)
@@ -29,6 +33,8 @@ def main(argv=None):
         if args.command == "import-cache":
             result = import_cache(args.input, args.output)
             print(json.dumps(result["summary"], sort_keys=True))
+        elif args.command == "profiles":
+            print(readable_summary(profile_file(args.input, args.output)))
         else:
             client = Downloader(args.state, args.account, args.cap, args.account_history)
             calls = read_plan(args.plan)

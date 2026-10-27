@@ -16,6 +16,7 @@ RELATIONS = (
     ("penaltiesTotal", "penaltiesScored", "penaltiesMissed", "penaltiesAccuracy"),
     ("shotsTotal", "shotsOnTarget", "shotsOffTarget", "shotsAccuracy"),
 )
+PROFILE_IDENTITY = ("provider", "competition_id", "season", "stage", "team_id", "player_id")
 
 
 def positive_id(value):
@@ -24,6 +25,28 @@ def positive_id(value):
 
 def mapping(value):
     return value if isinstance(value, dict) else {}
+
+
+def display_name(value):
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def valid_count(value):
+    return type(value) is int and value >= 0
+
+
+def valid_minutes(value):
+    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+
+def finite_ratio(numerator, denominator, scale=1):
+    if numerator is None or denominator is None or denominator <= 0:
+        return None
+    try:
+        value = scale * numerator / denominator
+        return value if math.isfinite(value) else None
+    except OverflowError:
+        return None
 
 
 def stage_for(fixture):
@@ -42,7 +65,8 @@ def normalize_match(fixture, body, provenance):
     expected = [mapping(fixture.get(k)).get("id") for k in ("homeTeam", "awayTeam")]
     context = {"provider": "highlightly", "competition_id": league.get("id"),
                "season": league.get("season"), "stage": stage_for(fixture),
-               "source_stage": fixture.get("round"), "match_id": match_id}
+               "source_stage": fixture.get("round"), "match_id": match_id,
+               "competition_name": display_name(league.get("name"))}
     invalid_context = (not all(positive_id(x) for x in [match_id, league.get("id"), *expected])
                        or expected[0] == expected[1] or type(league.get("season")) is not int)
     match_reasons = []
@@ -67,11 +91,13 @@ def normalize_match(fixture, body, provenance):
             continue
         for pi, player in enumerate(team["players"]):
             tid = mapping(team.get("team")).get("id")
-            entries.append((tid if positive_id(tid) else None, player, f"/{ti}/players/{pi}"))
-    occurrences = Counter(p.get("id") for _, p, _ in entries
+            entries.append((tid if positive_id(tid) else None,
+                            display_name(mapping(team.get("team")).get("name")),
+                            player, f"/{ti}/players/{pi}"))
+    occurrences = Counter(p.get("id") for _, _, p, _ in entries
                           if isinstance(p, dict) and positive_id(p.get("id")))
     accepted, excluded = [], []
-    for team_id, player, pointer in entries:
+    for team_id, team_name, player, pointer in entries:
         reasons = list(match_reasons)
         record = {**context, "team_id": team_id, "player_id": None,
                   "minutes": None, "counts": {},
@@ -80,6 +106,7 @@ def normalize_match(fixture, body, provenance):
             reasons.append("player_not_object")
             player = {}
         pid = player.get("id")
+        record.update(team_name=team_name, player_name=display_name(player.get("name")))
         record["player_id"] = pid if positive_id(pid) else None
         if not positive_id(pid):
             reasons.append("invalid_player_identity")
@@ -139,20 +166,25 @@ def normalize_match(fixture, body, provenance):
 
 def aggregate(records):
     """A separate observed-sample row for each club stint and competition stage."""
-    keys = ("provider", "competition_id", "season", "stage", "team_id", "player_id")
+    keys = PROFILE_IDENTITY
     groups = defaultdict(list)
     for record in records:
         if record["status"] == "accepted":
             groups[tuple(record[k] for k in keys)].append(record)
     result = []
     for identity, rows in sorted(groups.items()):
-        minutes = sum(r["minutes"] for r in rows)
-        counts = {k: sum(r["counts"][k] for r in rows) for k in CORE}
+        minutes_complete = all(valid_minutes(r.get("minutes")) for r in rows)
+        minutes = sum(r["minutes"] for r in rows) if minutes_complete else None
+        if minutes is not None and not valid_minutes(minutes):
+            minutes = None
+        count_coverage = {k: sum(valid_count(mapping(r.get("counts")).get(k)) for r in rows) for k in CORE}
+        counts = {k: sum(r["counts"][k] for r in rows) if count_coverage[k] == len(rows) else None for k in CORE}
         result.append({**dict(zip(keys, identity)), "scope": "observed_sample_incomplete",
-                       "minutes": minutes, "counts": counts,
-                       "per90": {k: v * 90 / minutes if minutes > 0 else None for k, v in counts.items()},
-                       "ratios": {rate: counts[s] / counts[t] if counts[t] else None
+                       "minutes": minutes, "counts": counts, "appearances": len(rows),
+                       "count_coverage": count_coverage,
+                       "per90": {k: finite_ratio(v, minutes, 90) for k, v in counts.items()},
+                       "ratios": {rate: finite_ratio(counts[s], counts[t])
                                   for t, s, _, rate in RELATIONS},
                        "contributing_matches": sorted({r["match_id"] for r in rows}),
-                       "source_snapshots": sorted({p["snapshot_id"] for r in rows for p in r["provenance"]})})
+                       "source_snapshots": sorted({p["snapshot_id"] for r in rows for p in r.get("provenance", [])})})
     return result

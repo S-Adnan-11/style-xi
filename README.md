@@ -2,7 +2,8 @@
 
 Football player analysis, starting with dependable match data preparation.
 The Python package imports cached Highlightly responses, validates player-match
-records and produces explicitly incomplete sample aggregates with coverage evidence.
+records and produces explainable sample profiles with counts, actions per 90,
+supported success percentages and explicit field and match coverage.
 Player similarity, clustering and a dashboard are future work.
 
 ## Setup
@@ -24,12 +25,30 @@ Other Python versions and platforms are untested.
 ```powershell
 .\.venv\Scripts\python.exe examples/synthetic_demo.py
 .\.venv\Scripts\python.exe -m style_xi import-cache --input data/synthetic --output outputs/sample.json
+.\.venv\Scripts\python.exe -m style_xi profiles --input outputs/sample.json --output outputs/profiles.json
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 The example generates fictional IDs and statistics locally. No football dataset,
 credential or downloaded response is bundled. Keep runtime inputs under `data/`
 and generated outputs under `outputs/`; both are ignored by Git.
+
+The CLI prints a readable summary and writes structured profiles. All names, clubs,
+competitions, IDs and statistics in the example are fictional. Aster Vale records
+100 passes over 120 accepted minutes: 75 passes per 90, with 82 successful out of
+100 for 82% success. Bram Quill records 20 dribbles over 120 minutes, with 50%
+success. Cora Flint has a collected row with a missing interception count, so that
+entire row is quarantined and her profile shows only one of two collected player
+matches accepted. Aster's other club and playoff sample stay separate.
+
+Use `build_profiles(import_result)` from `style_xi.profiles` for the reusable API.
+It consumes the existing import result, retaining player, club, competition,
+season and stage IDs. Names are display labels only. Each metric reports valid-input
+rows against eligible accepted rows; each profile also reports attributable
+exclusions and provider-manifest coverage. A zero-attempt ratio is unavailable,
+with a reason. Missing metric inputs never become zero or partial full-scope totals.
+See the [metric contract and profile schema](docs/profiles.md) for formulas,
+required fields, definitions and limitations.
 
 ## Bounded acquisition
 
