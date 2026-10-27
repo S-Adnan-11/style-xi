@@ -15,7 +15,7 @@ def inspect_pages(snapshots, acquired=()):
     results = []
     for (league, season), pages in sorted(groups.items(), key=lambda x: str(x[0])):
         issues, totals, by_offset, fixtures = set(), set(), {}, {}
-        for page in pages:
+        for page in sorted(pages, key=digest):
             body, params = page["body"], page.get("parameters", {})
             if not isinstance(body, dict):
                 issues.add("invalid_page_envelope")

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -27,8 +28,15 @@ def digest(value):
 
 
 def read_json(path):
+    def finite_float(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError()
+        return parsed
+
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"),
+                          parse_float=finite_float,
                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
     except (ValueError, OSError):
         raise DataError("json_unreadable_or_nonfinite") from None

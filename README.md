@@ -23,13 +23,53 @@ Other Python versions and platforms are untested.
 
 ```powershell
 .\.venv\Scripts\python.exe examples/synthetic_demo.py
-.\.venv\Scripts\python.exe -c "from style_xi.pipeline import import_cache; print(import_cache('data/synthetic', 'outputs/sample.json')['summary'])"
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_pipeline.py -v
+.\.venv\Scripts\python.exe -m style_xi import-cache --input data/synthetic --output outputs/sample.json
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 The example generates fictional IDs and statistics locally. No football dataset,
 credential or downloaded response is bundled. Keep runtime inputs under `data/`
 and generated outputs under `outputs/`; both are ignored by Git.
+
+## Bounded acquisition
+
+Inspect an explicit request plan without accessing a credential or the network:
+
+```powershell
+.\.venv\Scripts\python.exe -m style_xi acquire --plan data/synthetic-plan.json --state data/acquisition --account data/account.json
+```
+
+This generated plan uses fictional IDs and is for dry runs only. For actual
+acquisition, supply a plan containing at most 50 explicit `calls`, each with
+`path`, `parameters` and `scope`. Supported paths are `/matches` and
+`/box-score/{matchId}`. Match parameters are `leagueId`, `season`, `limit` and
+`offset`. Scope must include `competition_id`, `season` and `stage`; match-list
+scope uses `all_provider_stages` because the endpoint mixes stages.
+
+See [acquisition and recovery](docs/acquisition.md) for the plan and account-state
+formats. Only `--live` dispatches uncached calls, using `HIGHLIGHTLY_API_KEY` from
+the process environment. Supply credentials through your local secret loader;
+never place them in a plan, argument, URL or committed file.
+
+The downloader reserves every attempted request before dispatch. Its persistent
+budget is at most 50 calls, including failures, across invocations using the same
+state directory. Use a single shared account file for all participating clients,
+and provide existing usage ledgers with repeatable `--account-history` options.
+It requires a balance observed within five minutes on the same UTC day, accounts
+for subsequent known usage, and retains ten daily requests. It never guesses a
+quota reset. Unknown current balance stops acquisition.
+
+Requests are sequential with a 20-second socket timeout, an 8 MiB response limit,
+no automatic retries and no redirect following. HTTP errors, provider errors,
+unexpected plans and uncertain interrupted requests stop the run. Successful
+responses are cached atomically, with retrieval times, body hashes and nonsecret
+request identities. A completed cache hit uses no credential and spends no quota.
+Conflicting cached snapshots are retained and require review.
+
+The runner checkpoints coverage after each response. It records page offsets,
+limits, listed match IDs and acquisition state; it detects repeated/empty pages,
+duplicate IDs, changed snapshots, inconsistent totals and incomplete pages.
+It runs only the supplied calls and does not schedule or expand a harvest.
 
 ## Inputs and outputs
 

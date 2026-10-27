@@ -30,13 +30,18 @@ def load_snapshots(directory):
 
 def replay(snapshots):
     fixtures, boxes = defaultdict(dict), defaultdict(list)
+    fixture_sources = defaultdict(list)
     diagnostics = []
     for item in snapshots:
         endpoint, body = item["endpoint"], item["body"]
         if endpoint.endswith("/matches") and isinstance(body, dict) and isinstance(body.get("data"), list):
-            for row in body["data"]:
+            for index, row in enumerate(body["data"]):
                 if isinstance(row, dict) and positive_id(row.get("id")):
                     fixtures[row["id"]][digest(row)] = row
+                    fixture_sources[row["id"]].append({"snapshot_id": item["snapshot_id"],
+                                                       "source_file": item["source_file"],
+                                                       "pointer": f"/data/{index}",
+                                                       "fixture_sha256": digest(row)})
         elif "/box-score/" in endpoint:
             try:
                 mid = int(endpoint.rsplit("/", 1)[1])
@@ -77,6 +82,8 @@ def replay(snapshots):
             continue
         accepted.extend(good)
         excluded.extend(bad)
+        for row in good + bad:
+            row["fixture_provenance"] = sorted(fixture_sources[mid], key=lambda p: (p["snapshot_id"], p["source_file"], p["pointer"]))
     reasons = Counter(r for row in excluded + diagnostics for r in row["reasons"])
     return {"schema_version": 1, "scope": "observed_sample_incomplete",
             "validation": {"structural_and_arithmetic": "checked_for_accepted_records",

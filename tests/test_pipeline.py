@@ -177,6 +177,30 @@ class ReplayTests(unittest.TestCase):
             with self.assertRaisesRegex(DataError, "no_response_snapshots"):
                 load_snapshots(temp)
 
+    def test_nonfinite_json_is_rejected_with_bounded_diagnostic(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for content in ('{"value":NaN}', '{"value":1e999}'):
+                (Path(temp) / "bad.json").write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(DataError, "json_unreadable_or_nonfinite"):
+                    load_snapshots(temp)
+
+    def test_fixture_provenance_retains_page_attachment(self):
+        result = self.replay_inputs(snapshots())
+        reference = result["player_matches"][0]["fixture_provenance"][0]
+        self.assertEqual(reference["pointer"], "/data/0")
+        self.assertEqual(reference["fixture_sha256"], digest(fixture()))
+
+    def test_conflicting_inputs_are_deterministic_under_reordering(self):
+        inputs = snapshots()
+        changed = deepcopy(inputs[0])
+        changed["body"]["data"][0]["round"] = "Final"
+        inputs.append(changed)
+        with tempfile.TemporaryDirectory() as temp:
+            for i, value in enumerate(inputs):
+                atomic_json(Path(temp) / f"{i}.json", value)
+            loaded = load_snapshots(temp)
+            self.assertEqual(digest(replay(loaded)), digest(replay(list(reversed(loaded)))))
+
 
 class CoverageTests(unittest.TestCase):
     def page(self, offset=0, ids=(900001,), total=2, limit=1):
