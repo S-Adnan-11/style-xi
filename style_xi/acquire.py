@@ -24,7 +24,7 @@ def request_identity(path, params):
             raise DataError("invalid_match_parameter")
         if params["leagueId"] <= 0 or params["season"] < 2000 or not 1 <= params["limit"] <= 100 or params["offset"] < 0:
             raise DataError("invalid_match_parameter")
-    elif re.fullmatch(r"/box-score/[1-9][0-9]*", path):
+    elif re.fullmatch(r"/(?:box-score|lineups)/[1-9][0-9]*", path):
         if params:
             raise DataError("box_parameters_not_allowed")
     else:
@@ -125,7 +125,7 @@ class Downloader:
                            "cached": self.cached(request_identity(path, params)) is not None}
                           for path, params, scope in calls]}
 
-    def get(self, path, params, scope, key):
+    def get(self, path, params, scope, key, *, allow_quota_bootstrap=False):
         identity = request_identity(path, params)
         if not isinstance(scope, dict) or not all(k in scope for k in ("competition_id", "season", "stage")):
             raise DataError("explicit_acquisition_scope_required")
@@ -161,27 +161,54 @@ class Downloader:
                 raise DataError("budget_ledger_missing_with_account_history")
             for ledger_path in self.history:
                 all_attempts.extend(read_json(ledger_path)["attempts"])
-            if fresh_remaining(account.get("observation", {}), all_attempts) <= RESERVE:
+            bootstrap = False
+            try:
+                remaining_before = fresh_remaining(account.get("observation", {}), all_attempts)
+            except DataError:
+                if not allow_quota_bootstrap or path != "/matches" or state["attempts"] or state.get("quota_bootstrap_used"):
+                    raise
+                # A current malformed balance is contradictory, not an absent/stale observation.
+                observation = account.get("observation", {})
+                try:
+                    observed = datetime.fromisoformat(observation.get("observed_utc", ""))
+                    if 0 <= (datetime.now(timezone.utc) - observed).total_seconds() <= 300:
+                        raise DataError("contradictory_current_quota_evidence")
+                except (ValueError, TypeError):
+                    pass
+                bootstrap = True
+                remaining_before = None
+            if remaining_before is not None and remaining_before <= RESERVE:
                 raise DataError("daily_reserve_reached")
             attempt = {"number": len(state["attempts"]) + 1, "request_id": identity,
                        "endpoint": "https://" + HOST + path, "parameters": params,
-                       "scope": scope, "reserved_utc": now(), "outcome": "reserved"}
+                       "scope": scope, "reserved_utc": now(), "outcome": "reserved", "quota_bootstrap": bootstrap}
             state["attempts"].append(attempt)
+            if bootstrap:
+                state["quota_bootstrap_used"] = True
             # Shared reservation first: a crash can overcount, never undercount the account.
             account.setdefault("attempts", []).append({"request_id": identity, "budget_id": self.budget_id,
                                                        "reserved_utc": attempt["reserved_utc"]})
             atomic_json(self.account, account)
             atomic_json(self.root / "requests.json", state)
+            failure_body = None
             try:
                 status, headers, raw = self.transport(path, params, key)
                 headers = {k.lower(): v for k, v in headers.items()}
                 attempt.update(status=status, retrieved_utc=now(), original_body_sha256=hashlib.sha256(raw).hexdigest())
+                quota = scrub({k: str(v)[:200] for k, v in headers.items()
+                               if k.startswith("x-ratelimit") or k in ("date", "retry-after", "ratelimit-reset")}, key)
+                attempt["quota"] = quota
                 remaining = headers.get("x-ratelimit-requests-remaining")
                 if remaining is not None and str(remaining).isdigit():
                     account["observation"] = {"observed_utc": attempt["retrieved_utc"], "remaining": int(remaining), "source": "response_header"}
                 else:
                     account["observation"] = {}
                 atomic_json(self.account, account)
+                try:
+                    failure_body = scrub(json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError())), key)
+                    digest(failure_body)
+                except (ValueError, UnicodeDecodeError):
+                    failure_body = {"non_json_excerpt": scrub(raw[:1024].decode("utf-8", errors="replace"), key)}
                 if status != 200:
                     raise DataError("http_" + str(status))
                 body = json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
@@ -193,14 +220,23 @@ class Downloader:
                         raise DataError("unexpected_plan")
                     if "hidden" in str(plan.get("message", "")).lower() or "restricted" in str(plan.get("message", "")).lower():
                         raise DataError("plan_access_uncertain")
+                    account["plan"] = scrub(plan, key)
+                elif path == "/matches":
+                    raise DataError("missing_listing_plan_context")
+                atomic_json(self.account, account)
                 safe_body = scrub(body, key)
                 snapshot = {**{k: attempt[k] for k in ("request_id", "endpoint", "parameters", "scope", "retrieved_utc", "status", "original_body_sha256")},
-                            "body": safe_body, "stored_body_sha256": digest(safe_body),
+                            "body": safe_body, "stored_body_sha256": digest(safe_body), "quota": quota,
                             "raw_body_utf8": raw.decode("utf-8") if safe_body == body else None,
                             "raw_body_retained": safe_body == body}
                 destination = self.root / "responses" / (identity + "." + snapshot["stored_body_sha256"] + ".json")
                 atomic_json(destination, snapshot)
                 attempt.update(outcome="success", snapshot_id=snapshot["stored_body_sha256"])
+                if not account.get("observation"):
+                    state["halted"] = account["halted"] = "quota_evidence_missing"
+                elif remaining_before is not None and int(remaining) > remaining_before:
+                    state["halted"] = account["halted"] = "contradictory_quota_increase"
+                atomic_json(self.account, account)
                 atomic_json(self.root / "requests.json", state)
                 return snapshot
             except Exception as error:
@@ -208,6 +244,10 @@ class Downloader:
                 attempt["outcome"] = "failed"
                 state["halted"] = code
                 account["halted"] = code
+                atomic_json(self.root / "failures" / f"{identity}.{attempt['number']}.json",
+                            {"request_id": identity, "status": attempt.get("status"), "reason": code,
+                             "quota": attempt.get("quota", {}), "body": failure_body,
+                             "original_body_sha256": attempt.get("original_body_sha256")})
                 atomic_json(self.account, account)
                 atomic_json(self.root / "requests.json", state)
                 raise DataError(code) from None

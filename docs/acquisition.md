@@ -7,7 +7,11 @@ No raw data is included in the repository.
 ## Plan format
 
 The following IDs are fictional. Replace them with inspected provider IDs before
-any live use. Save the plan in an ignored runtime location:
+any live use. Save the plan in an ignored runtime location.
+
+Supported paths are `/matches`, `/box-score/{matchId}` and `/lineups/{matchId}`.
+Lineups are cached source evidence only; the importer does not turn match positions
+into season roles or comparison cohorts.
 
 ```json
 {
@@ -67,8 +71,17 @@ existing JSON ledger with an `attempts` list whose entries have `reserved_utc`.
 Each known attempt after the observation is conservatively deducted. Avoid adding
 the same ledger twice: duplicate history can conservatively overcount usage.
 
-The tool refuses a missing or stale observation. It does not issue a speculative
-data request to discover the balance or infer allowance from yesterday's quota.
+Normal acquisition refuses a missing or stale observation. The CLI does not
+bootstrap quota. A separately authorized low-level workflow may opt into
+`Downloader.get(..., allow_quota_bootstrap=True)` on its first useful `/matches`
+request. This exception is persisted before transport, consumes one attempt and
+cannot bypass a fresh balance at or below the reserve. It is unavailable for box
+scores or lineups and cannot be repeated after restart. Never infer allowance from
+yesterday's quota.
+
+Match listings must identify the Basic/free plan. Unexpected or missing plan
+context stops acquisition. Each successful response must supply quota evidence;
+missing evidence or a contradictory increase persists a halt before another call.
 Keep the same shared account state across budget directories. Never delete
 attempts or clear a halt merely to resume.
 
@@ -79,6 +92,8 @@ attempts or clear a halt merely to resume.
   the parsed source body, original response hash, stored-body hash and retrieval
   time. Exact UTF-8 response text is retained when it needs no secret redaction.
   Credential echoes are redacted and exact raw text is omitted in that case.
+- `failures/`: redacted HTTP failure evidence with status, bounded body/excerpt,
+  hashes and nonsecret quota headers. Failed attempts still consume the budget.
 - `checkpoint.json`: request-plan hash, completed indexes, coverage and coverage
   hashes after each call. A completed plan can still have incomplete coverage.
 

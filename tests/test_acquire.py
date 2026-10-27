@@ -134,7 +134,7 @@ class AcquisitionTests(unittest.TestCase):
 
     def test_secret_echo_is_redacted_from_cached_body_and_raw(self):
         def echo(*args):
-            return 200, {}, json.dumps({"echo": TOKEN, "apiKey": TOKEN}).encode()
+            return 200, {}, json.dumps({"echo": TOKEN, "apiKey": TOKEN, "plan": {"tier": "BASIC"}}).encode()
         snapshot = self.get(self.client(transport=echo))
         self.assertNotIn(TOKEN, json.dumps(snapshot))
         self.assertFalse(snapshot["raw_body_retained"])
@@ -178,7 +178,7 @@ class AcquisitionTests(unittest.TestCase):
         def page(path, params, key):
             self.calls += 1
             return 200, {"x-ratelimit-requests-remaining": "18"}, json.dumps({
-                "data": [fixture()], "pagination": {"offset": params["offset"], "limit": 1, "totalCount": 3}}).encode()
+                "data": [fixture()], "pagination": {"offset": params["offset"], "limit": 1, "totalCount": 3}, "plan": {"tier": "BASIC"}}).encode()
         calls = [("/matches", PARAMS | {"offset": offset}, SCOPE) for offset in range(3)]
         with self.assertRaisesRegex(DataError, "repeated_page"):
             run_plan(self.client(transport=page), calls, TOKEN)
@@ -186,7 +186,7 @@ class AcquisitionTests(unittest.TestCase):
         self.assertIn("repeated_page", read_json(self.root / "budget" / "checkpoint.json")["halted"])
 
     def test_secret_as_response_dictionary_key_is_redacted(self):
-        snapshot = self.get(self.client(transport=lambda *args: (200, {}, json.dumps({TOKEN: "echo"}).encode())))
+        snapshot = self.get(self.client(transport=lambda *args: (200, {}, json.dumps({TOKEN: "echo", "plan": {"tier": "BASIC"}}).encode())))
         self.assertNotIn(TOKEN, json.dumps(snapshot))
 
     def test_raw_cache_corruption_is_detected(self):
@@ -209,6 +209,68 @@ class AcquisitionTests(unittest.TestCase):
         atomic_json(self.account, account)
         with self.assertRaisesRegex(DataError, "budget_ledger_missing_with_account_history"):
             self.get(self.client())
+
+    def test_explicit_bootstrap_counts_once_and_observes_fresh_quota(self):
+        atomic_json(self.account, {"observation": {}, "attempts": []})
+        client = self.client()
+        snapshot = client.get("/matches", PARAMS, SCOPE, TOKEN, allow_quota_bootstrap=True)
+        self.assertEqual(self.calls, 1)
+        self.assertTrue(client.ledger()["attempts"][0]["quota_bootstrap"])
+        self.assertTrue(client.ledger()["quota_bootstrap_used"])
+        self.assertEqual(snapshot["quota"]["x-ratelimit-requests-remaining"], "19")
+        self.assertEqual(fresh_remaining(read_json(self.account)["observation"], read_json(self.account)["attempts"]), 19)
+        client.get("/matches", PARAMS, SCOPE, None, allow_quota_bootstrap=True)
+        self.assertEqual(self.calls, 1)
+
+    def test_bootstrap_cannot_bypass_known_reserve_or_use_box_endpoint(self):
+        atomic_json(self.account, {"observation": {"observed_utc": datetime.now(timezone.utc).isoformat(), "remaining": 10}, "attempts": []})
+        with self.assertRaisesRegex(DataError, "daily_reserve_reached"):
+            self.client().get("/matches", PARAMS, SCOPE, TOKEN, allow_quota_bootstrap=True)
+        atomic_json(self.account, {"observation": {}, "attempts": []})
+        with self.assertRaises(DataError):
+            self.client().get("/box-score/900001", {}, SCOPE, TOKEN, allow_quota_bootstrap=True)
+        self.assertEqual(self.calls, 0)
+
+    def test_missing_bootstrap_quota_halts_future_dispatch_and_cannot_repeat(self):
+        atomic_json(self.account, {"observation": {}, "attempts": []})
+        def no_quota(*args):
+            self.calls += 1
+            return 200, {}, b'{"data":[],"plan":{"tier":"BASIC"}}'
+        client = self.client(transport=no_quota)
+        client.get("/matches", PARAMS, SCOPE, TOKEN, allow_quota_bootstrap=True)
+        self.assertEqual(client.ledger()["halted"], "quota_evidence_missing")
+        with self.assertRaises(DataError):
+            self.client(transport=no_quota).get("/matches", PARAMS | {"offset": 1}, SCOPE, TOKEN, allow_quota_bootstrap=True)
+        self.assertEqual(self.calls, 1)
+
+    def test_plan_denial_and_failure_evidence_are_redacted_and_persistent(self):
+        def denied(*args):
+            return 403, {"x-ratelimit-requests-remaining": "19"}, json.dumps({"error": TOKEN}).encode()
+        client = self.client(transport=denied)
+        with self.assertRaisesRegex(DataError, "http_403"):
+            self.get(client)
+        failure = read_json(next((client.root / "failures").glob("*.json")))
+        self.assertNotIn(TOKEN, json.dumps(failure))
+        self.assertEqual(failure["status"], 403)
+        self.assertEqual(len(client.ledger()["attempts"]), 1)
+
+    def test_missing_listing_plan_context_and_contradictory_quota_stop(self):
+        with self.assertRaisesRegex(DataError, "missing_listing_plan_context"):
+            self.get(self.client(transport=lambda *args: (200, {}, b'{}')))
+        # A separate isolated budget/account tests a balance increasing without a reset.
+        other = self.root / "other-account.json"
+        atomic_json(other, {"observation": {"observed_utc": datetime.now(timezone.utc).isoformat(), "remaining": 20}, "attempts": []})
+        client = Downloader(self.root / "other-budget", other, transport=lambda *args: (200, {"x-ratelimit-requests-remaining": "25"}, b'[]'))
+        client.get("/lineups/900001", {}, SCOPE, TOKEN)
+        self.assertEqual(client.ledger()["halted"], "contradictory_quota_increase")
+
+    def test_bootstrap_cap_and_shared_history_survive_restart(self):
+        atomic_json(self.account, {"observation": {}, "attempts": []})
+        client = self.client(cap=1)
+        client.get("/matches", PARAMS, SCOPE, TOKEN, allow_quota_bootstrap=True)
+        with self.assertRaisesRegex(DataError, "request_budget_exhausted"):
+            self.client(cap=1).get("/lineups/900001", {}, SCOPE, TOKEN)
+        self.assertEqual(len(read_json(self.account)["attempts"]), 1)
 
 
 if __name__ == "__main__":
