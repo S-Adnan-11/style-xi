@@ -164,6 +164,13 @@ not establish independently expected competition coverage or box-score accuracy.
 These checks establish structure and internal consistency where possible, not
 independent accuracy, complete seasons or a validated playing-style model.
 Review [Highlightly's field definitions](https://highlightly.net/football-api/documentation/box-score/)
-and [terms](https://highlightly.net/terms/) for your intended use. Basic-specific
-retention and public reuse conditions remain unresolved. No data rights or project
-code licence are granted by this README.
+for the source schema. No project code licence has been selected.
+
+## Data and credits
+
+Football statistics for Style-XⅠ come from [Highlightly](https://highlightly.net/football-api/). I contacted their team to clarify the permissions for this project, and they confirmed that their Basic plan allows collecting and retaining statistics, building player analyses, and displaying statistics and derived comparisons publicly—including at hackathons with prizes.
+
+Thanks to the Highlightly team for providing the API and clarifying these permissions. Raw API responses remain private and aren’t redistributed. Their [terms](https://highlightly.net/terms/) also restrict API resale, pass-through services and competing databases or services.
+
+The demos use invented players and statistics. This permission does not establish
+data accuracy, complete coverage, a partnership or endorsement.
