@@ -4,7 +4,8 @@ Football player analysis, starting with dependable match data preparation.
 The Python package imports cached Highlightly responses, validates player-match
 records and produces explainable sample profiles with counts, actions per 90,
 supported success percentages and explicit field and match coverage.
-Player similarity, clustering and a dashboard are future work.
+A fictional nearest-neighbour prototype compares activity patterns and explains each
+distance. Real-player similarity, clustering and a dashboard remain future work.
 
 ## Setup
 
@@ -49,6 +50,28 @@ exclusions and provider-manifest coverage. A zero-attempt ratio is unavailable,
 with a reason. Missing metric inputs never become zero or partial full-scope totals.
 See the [metric contract and profile schema](docs/profiles.md) for formulas,
 required fields, definitions and limitations.
+
+## Fictional activity comparison
+
+```powershell
+.\.venv\Scripts\python.exe examples/similarity_demo.py
+.\.venv\Scripts\python.exe -m style_xi compare --input outputs/fictional-profiles.json --cohort data/similarity/cohort.json --query highlightly/900301/2025/regular/900101/901201 --min-minutes 90 --min-appearances 2 --limit 5 --output outputs/neighbours.json
+```
+
+This example uses the existing importer and profile functions with fictional match
+counts. Its declared reference has five fictional midfield examples in one competition,
+season and regular-season stage. The fixed features are passes, dribbles, tackles and
+shots per 90, with equal family weights. The result includes reference means/scales,
+eligibility decisions, raw and standardized deltas and each squared-distance contribution.
+**Lower distance means closer recorded activity patterns**, not greater player ability.
+
+Mira and Neri tie as close patterns; a genuine zero-activity profile remains eligible.
+Missing-input and short samples are excluded, as are the query player's other club
+and playoff. The missing-input fixture is explicitly labelled: one count is removed
+after raw validation to exercise the existing profile missingness boundary. Raw-record
+acceptance rules remain unchanged. All generated files are ignored and require no
+credentials, private files or network. See [the comparison contract](docs/similarity.md)
+for the numerical method, cohort format, limitations and reusable API.
 
 ## Bounded acquisition
 
