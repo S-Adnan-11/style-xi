@@ -8,24 +8,29 @@ from .normalize import aggregate, mapping, normalize_match, positive_id
 from .storage import DataError, atomic_json, digest, read_json
 
 
+def prepare_snapshot(item, source_file):
+    if (not isinstance(item, dict) or not isinstance(item.get("endpoint"), str)
+            or "body" not in item or not isinstance(item.get("parameters", {}), dict)):
+        raise DataError("invalid_snapshot_envelope")
+    if item.get("status") != 200:
+        return None
+    if "stored_body_sha256" in item and digest(item["body"]) != item["stored_body_sha256"]:
+        raise DataError("snapshot_hash_mismatch")
+    snapshot_id = digest({k: item.get(k) for k in ("endpoint", "parameters", "scope", "body", "retrieved_utc")})
+    return {**item, "snapshot_id": snapshot_id, "source_file": source_file}
+
+
 def load_snapshots(directory):
-    snapshots = []
     paths = sorted(Path(directory).glob("*.json"))
     if not paths:
         raise DataError("no_response_snapshots")
-    for path in paths:
-        item = read_json(path)
-        if (not isinstance(item, dict) or not isinstance(item.get("endpoint"), str)
-                or "body" not in item or not isinstance(item.get("parameters", {}), dict)):
-            raise DataError("invalid_snapshot_envelope")
-        if item.get("status") != 200:
-            continue
-        if "stored_body_sha256" in item:
-            if digest(item["body"]) != item["stored_body_sha256"]:
-                raise DataError("snapshot_hash_mismatch")
-        snapshot_id = digest({k: item.get(k) for k in ("endpoint", "parameters", "scope", "body", "retrieved_utc")})
-        snapshots.append({**item, "snapshot_id": snapshot_id, "source_file": path.name})
-    return snapshots
+    return [snapshot for path in paths if (snapshot := prepare_snapshot(read_json(path), path.name)) is not None]
+
+
+def replay_envelopes(envelopes):
+    """Use the same importer for an in-memory, explicitly supplied source."""
+    return replay([snapshot for i, item in enumerate(envelopes)
+                   if (snapshot := prepare_snapshot(item, f"fictional-{i}.json")) is not None])
 
 
 def replay(snapshots):

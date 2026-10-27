@@ -6,20 +6,9 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from style_xi.fictional import fixture, player
 from style_xi.normalize import CORE
 from style_xi.storage import atomic_json
-
-
-def fixture(match=900001, team=900101, season=2025, stage="Regular Season - 1"):
-    return {"id": match, "round": stage, "league": {"id": 900301, "season": season},
-            "homeTeam": {"id": team}, "awayTeam": {"id": 900102},
-            "state": {"description": "Finished"}}
-
-
-def player(pid=900201, minutes=90):
-    counts = dict.fromkeys(CORE, 0)
-    counts.update(passesTotal=10, passesSuccessful=8, passesFailed=2)
-    return {"id": pid, "minutesPlayed": minutes, "statistics": counts}
 
 
 def body():

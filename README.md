@@ -5,7 +5,8 @@ The Python package imports cached Highlightly responses, validates player-match
 records and produces explainable sample profiles with counts, actions per 90,
 supported success percentages and explicit field and match coverage.
 A fictional nearest-neighbour prototype compares activity patterns and explains each
-distance. Real-player similarity, clustering and a dashboard remain future work.
+distance. A local Streamlit interface presents this fictional comparison.
+Real-player similarity and clustering remain future work.
 
 ## Setup
 
@@ -20,6 +21,29 @@ py -3.15 -m venv .venv
 Run commands from the repository root. The importer uses Python's standard library;
 the hash-pinned requirements also include the project's numerical and UI libraries.
 Other Python versions and platforms are untested.
+
+## Local fictional interface
+
+From the repository root, start the app:
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501 --browser.gatherUsageStats false
+```
+
+Open <http://127.0.0.1:8501>. Stop the app with **Ctrl+C** in that terminal.
+Choose a player, review the recorded sample, then choose a neighbour for the
+side-by-side rates. Expand the details for coverage, exclusions and the calculation.
+Equal distances share a group; display order does not break a tie.
+
+The app builds the reviewed fictional examples in memory. It needs no credential,
+private cache, generated output or network connection. Players, clubs and statistics
+are invented. The reference and the example's minimum of 90 minutes and two
+appearances stay fixed when selections change. Ineligible examples remain selectable
+so their unavailable inputs and exclusion reasons can be inspected.
+
+The interface uses the same package functions as the CLI. It has no real-data mode,
+provider controls or data exports. Streamlit usage-statistics collection is disabled
+in the local configuration.
 
 ## Offline example
 
@@ -83,9 +107,9 @@ Inspect an explicit request plan without accessing a credential or the network:
 
 This generated plan uses fictional IDs and is for dry runs only. For actual
 acquisition, supply a plan containing at most 50 explicit `calls`, each with
-`path`, `parameters` and `scope`. Supported paths are `/matches` and
-`/box-score/{matchId}`. Match parameters are `leagueId`, `season`, `limit` and
-`offset`. Scope must include `competition_id`, `season` and `stage`; match-list
+`path`, `parameters` and `scope`. Supported paths are `/matches`,
+`/box-score/{matchId}` and `/lineups/{matchId}`. Match parameters are `leagueId`,
+`season`, `limit` and `offset`. Scope must include `competition_id`, `season` and `stage`; match-list
 scope uses `all_provider_stages` because the endpoint mixes stages.
 
 See [acquisition and recovery](docs/acquisition.md) for the plan and account-state
@@ -99,7 +123,9 @@ state directory. Use a single shared account file for all participating clients,
 and provide existing usage ledgers with repeatable `--account-history` options.
 It requires a balance observed within five minutes on the same UTC day, accounts
 for subsequent known usage, and retains ten daily requests. It never guesses a
-quota reset. Unknown current balance stops acquisition.
+quota reset. Unknown current balance stops normal acquisition. A separately
+authorized low-level caller can explicitly allow one useful match-list request to
+establish fresh quota evidence; the CLI does not enable this exception.
 
 Requests are sequential with a 20-second socket timeout, an 8 MiB response limit,
 no automatic retries and no redirect following. HTTP errors, provider errors,
