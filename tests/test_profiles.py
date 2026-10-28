@@ -56,6 +56,25 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(missing["reason"], "zero_attempts")
         self.assertTrue(missing["coverage"]["inputs_complete"])
 
+    def test_scoped_shots_and_recorded_cameo_minutes_retain_values(self):
+        # A blocked-only effort has no player shot count; never infer team blocks.
+        for row in self.imported["player_matches"]:
+            if row["player_id"] == 900201:
+                row["counts"].update(shotsTotal=0, shotsOnTarget=0, shotsOffTarget=0)
+                row["minutes"] = 8
+        result = build_profiles(self.imported)
+        profile = find(result)
+        self.assertEqual(profile["accepted_minutes"], 16)
+        self.assertEqual(profile["metrics"]["shots_per_90"]["value"], 0)
+        self.assertEqual(profile["metrics"]["passes_per_90"]["value"], 100 * 90 / 16)
+        self.assertEqual(result["source_field_semantics_version"], 1)
+        scope = result["metric_contract"]["shots_per_90"]["source_semantics"]
+        self.assertIn("excluding blocked", scope["scope"])
+        self.assertIn("separate measure", scope["limitations"])
+        self.assertEqual(result["metric_contract"]["tackles_per_90"]["source_semantics"]["status"],
+                         "operational_definition_unpublished")
+        self.assertEqual(result["validation"]["independent_accuracy"], "not_established")
+
     def test_importer_missing_record_excluded_with_visible_sample_boundary(self):
         result = build_profiles(self.imported)
         cora = find(result, player=900203)

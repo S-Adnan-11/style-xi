@@ -78,6 +78,26 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(self.make().run(TOKEN)["new_attempts"], 0)
         self.assertEqual([g["usable_boxes"] for g in result["leagues"]], [17] * 5)
 
+    def test_bounded_checkpoint_then_resume_shares_daily_and_campaign_counters(self):
+        self.per_league = 30
+        first = self.campaign.run(TOKEN, max_new_attempts=15)
+        self.assertEqual(first["stop_reason"], "invocation_attempt_limit")
+        self.assertFalse(first["workflow_halted"])
+        self.assertEqual(first["new_attempts"], 15)  # Five inventories, two boxes per league.
+        self.assertEqual([g["usable_boxes"] for g in first["leagues"]], [2] * 5)
+        second = self.make().run(TOKEN)
+        self.assertEqual(second["new_attempts"], 75)
+        self.assertEqual((second["daily_usage"], second["campaign_attempts"], self.remaining), (90, 90, 10))
+        self.assertEqual(len({json.dumps(c, sort_keys=True) for c in self.calls}), 90)
+
+    def test_invalid_invocation_limit_never_mutates_or_dispatches(self):
+        before = (self.account.read_bytes(), (self.root / "state/requests.json").read_bytes())
+        for limit in (0, -1, True, 1.5, "10"):
+            with self.assertRaisesRegex(DataError, "invalid_invocation_attempt_limit"):
+                self.campaign.run(TOKEN, max_new_attempts=limit)
+        self.assertEqual(before, (self.account.read_bytes(), (self.root / "state/requests.json").read_bytes()))
+        self.assertFalse(self.calls)
+
     def test_current_reserve_does_not_bootstrap_and_status_is_read_only(self):
         account = read_json(self.account)
         account["observation"] = {"observed_utc": datetime.now(timezone.utc).isoformat(), "remaining": 10}
@@ -248,6 +268,19 @@ class CampaignTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "field_validation_pause_before_box_collection")
         restarted = Campaign(manifest_path, transport=lambda *args: self.fail("gate must prevent transport"), sleeper=lambda _: None)
         self.assertEqual(restarted.run(TOKEN)["new_attempts"], 0)
+        atomic_json(gate, {"allow_box_scores": True, "real_comparison_allowed": False,
+                           "reason": "collection_only_after_source_contract_review"})
+        self.remaining = 95
+        def boxes(path, params, key):
+            self.assertTrue(path.startswith("/box-score/"))
+            self.calls.append((path, params))
+            self.remaining -= 1
+            return 200, {"x-ratelimit-requests-limit": "100",
+                         "x-ratelimit-requests-remaining": str(self.remaining)}, json.dumps(body()).encode()
+        cleared = Campaign(manifest_path, transport=boxes, sleeper=lambda _: None).run(TOKEN)
+        self.assertEqual(cleared["new_attempts"], 5)
+        self.assertFalse(cleared["field_validation_gate"]["real_comparison_allowed"])
+        self.assertTrue(cleared["real_comparison_readiness"].startswith("blocked_"))
 
     def test_missing_completed_snapshot_cannot_be_marked_usable_or_refetched(self):
         self.campaign.run(TOKEN)

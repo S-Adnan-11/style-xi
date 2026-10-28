@@ -19,6 +19,27 @@ FAMILIES = (
 )
 
 
+def source_field_semantics():
+    """Version 1 source scope; provider statements do not establish accuracy."""
+    return {
+        "shotsTotal": {"status": "provider_confirmed_scope",
+                       "scope": "Player on-target plus off-target shots, excluding blocked attempts.",
+                       "limitations": "No player blocked counter; woodwork is described as off target. Team Shots accuracy includes blocks in its denominator and is a separate measure."},
+        "passesTotal": {"status": "provider_confirmed_identity_definition_unpublished",
+                        "scope": "passesSuccessful + passesFailed",
+                        "limitations": "Pass event inclusion, including restarts, is unpublished; cross-supplier equivalence is unestablished."},
+        "tacklesTotal": {"status": "operational_definition_unpublished",
+                         "scope": "Provider-recorded tackle count, with no won/lost split.",
+                         "limitations": "Neither attempted nor successful tackles is established; real similarity use requires method review."},
+        "duelsTotal": {"status": "provider_confirmed_counting_model",
+                       "scope": "One contest recorded against both players with exactly one winner.",
+                       "limitations": "Team sums require complete player rows; other suppliers' duel models may differ."},
+        "minutesPlayed": {"status": "provider_confirmed_mixed_convention_edges_unresolved",
+                          "scope": "Nonnegative integer recorded minutes, retained unchanged as the per-90 denominator.",
+                          "limitations": "Full-match starters receive 90 (120 with extra time); final substitutes may receive second-half added time. This is not uniform elapsed exposure. Short cameos may be materially affected; no correction or eligibility threshold is established. Clock edge cases remain unresolved."},
+    }
+
+
 def metric_contract():
     """Return a fresh, ordered contract for the 17 supported metrics."""
     specs = {}
@@ -33,6 +54,11 @@ def metric_contract():
             specs[f"{name}_success_pct"] = {"kind": "success_pct", "unit": "percent",
                                             "success_field": success, "attempt_field": total,
                                             "required_fields": fields, "relation": relation}
+    semantics = source_field_semantics()
+    for spec in specs.values():
+        field = spec.get("count_field", spec.get("attempt_field"))
+        if field in semantics:
+            spec["source_semantics"] = dict(semantics[field])
     return specs
 
 
@@ -185,6 +211,7 @@ def build_profiles(document):
     return {"schema_version": 1, "kind": "accepted_match_sample_profiles", "metric_contract_version": 1,
             "scope": "accepted_recorded_matches_incomplete_sample",
             "validation": {"independent_accuracy": "not_established", "full_season_coverage": "not_established"},
+            "source_field_semantics_version": 1, "source_field_semantics": source_field_semantics(),
             "metric_contract": contract,
             "summary": {"profiles": len(profiles), "accepted_records": sum(len(g) for g in groups.values()),
                         "excluded_records_in_input": len(document.get("excluded_records", [])),

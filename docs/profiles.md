@@ -44,8 +44,43 @@ All count inputs must be nonnegative integers, excluding booleans. Where compone
 are listed, successes plus failures must equal the total in every accepted row.
 These components are required even for the family total: a number is unavailable
 when its consistency cannot be established. No attempt count is reconstructed.
-Shot frequency retains the provider's `shotsTotal` definition; blocked-shot coverage
-is not inferred. Shot accuracy and additional efficiency measures are omitted here.
+Shot frequency retains the provider's `shotsTotal` definition: on-target plus
+off-target attempts, **excluding blocked attempts**. Existing `shots_per_90` keys
+remain stable and carry this scope in their contract metadata. No player blocked
+counter is available; team blocks must not be assigned to players. The provider
+describes woodwork as off target without specifying every combined event case.
+Team “Shots accuracy” includes blocks in its denominator and is separate from a
+player ratio; it cannot be reproduced from player rows. Shot accuracy and additional
+efficiency measures are omitted here.
+
+Additive `source_field_semantics_version: 1` and `source_field_semantics` metadata
+record provider-confirmed scope separately from unpublished definitions. Relevant
+metric entries include `source_semantics`. These statements do not independently
+verify a cache, every league, or cross-supplier agreement:
+
+- Pass totals equal successful plus failed passes; what constitutes a pass,
+  including restart treatment, is unpublished.
+- `tacklesTotal` is the provider-recorded tackle count with an unpublished operational
+  definition and no won/lost split. Neither attempted nor successful tackles is
+  established. Its presence does not clear it for real-player similarity.
+- One provider duel contest is recorded against both players with exactly one
+  winner. Team-sum checks need complete player rows; another publisher's labels
+  do not establish a comparable counting model.
+- Source `minutesPlayed` is a nonnegative integer. A starter finishing a full
+  match receives 90, or 120 with extra time. Substituted players receive recorded
+  exit/remainder minutes; the final substitute may receive second-half added time.
+  Keep these values unchanged. This mixed convention is not precise, uniform
+  elapsed exposure. Short cameos may be materially affected, with no quantified
+  error bound. Substitutes later removed, first-half added time, dismissals,
+  extra-time substitutions and rounding remain incompletely specified.
+
+No team minute sum is an unconditional invariant: consider team size, dismissals
+and incomplete rows. Recorded zero alone is not independent proof of nonappearance.
+No minute correction or real-rate eligibility threshold is established here. Future
+analysis needs sufficient exposure, a reviewed role/goalkeeper policy, stable
+source semantics and a method that avoids undefined inputs. Private raw import and
+profile computation do not make real comparisons or integration ready. The fictional
+four-feature method and weights remain unchanged; duels are only a later candidate.
 
 Units and formulas:
 

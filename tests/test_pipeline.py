@@ -59,7 +59,7 @@ class NormalizationTests(unittest.TestCase):
         self.assertIn("missing_count:passesTotal", bad[0]["reasons"])
 
     def test_invalid_minutes_and_counts(self):
-        for value in (-1, float("nan"), float("inf"), True, "90"):
+        for value in (-1, 1.5, 90.0, float("nan"), float("inf"), True, "90"):
             with self.subTest(value=value):
                 data = body()
                 data[0]["players"][0]["minutesPlayed"] = value
@@ -80,6 +80,16 @@ class NormalizationTests(unittest.TestCase):
         self.assertIn("inconsistent_rate:passesAccuracy", self.run_body(data)[1][0]["reasons"])
         stats["passesFailed"] = 3
         self.assertIn("inconsistent_counts:passesTotal", self.run_body(data)[1][0]["reasons"])
+
+    def test_player_shot_identity_includes_zero_minute_rows(self):
+        for minutes in (0, 90):
+            data = body()
+            p = data[0]["players"][0]
+            p["minutesPlayed"] = minutes
+            p["statistics"] = dict.fromkeys(CORE, 0)
+            p["statistics"]["shotsTotal"] = 1
+            _, bad = self.run_body(data)
+            self.assertIn("inconsistent_counts:shotsTotal", bad[0]["reasons"])
 
     def test_ambiguous_statistics_and_duplicate_player(self):
         for stats in ([], [dict.fromkeys(CORE, 0)] * 2, None):

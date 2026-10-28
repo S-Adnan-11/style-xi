@@ -10,6 +10,13 @@ can load a credential into memory, construct `Campaign(manifest_path)`, print
 `status()` and call `run(key)`. Public code has no dependency on that wrapper.
 `status()` is read-only and needs neither a key nor a provider call.
 
+For a bounded inspection step, call `run(key, max_new_attempts=10)`. A positive
+integer bounds actual additional attempts for that invocation, including failures
+and useful quota bootstrap. `invocation_attempt_limit` is a normal checkpoint stop.
+Review the preserved responses offline before continuing with `run(key)` against
+the same manifest, locks, account and counters. This option grants no extra daily
+or campaign allowance and does not reset any halt. Invalid limits fail before writes.
+
 ## Fixed manifest
 
 Review the identifiers against existing provider evidence before initialization.
@@ -38,6 +45,11 @@ The validation gate can pause box retrieval while useful fixture inventories are
 completed. Change it only after recording a field-evidence review. An absence of
 independent evidence is different from a material disagreement. Neither successful
 retrieval nor arithmetic agreement establishes statistical accuracy.
+
+Collection clearance may be recorded separately from analytical clearance. Preserve
+the prior gate and its evidence, document the source contracts checked, and keep
+`real_comparison_allowed: false` when analysis remains unreviewed. The campaign's
+readiness output stays blocked; opening `allow_box_scores` enables acquisition only.
 
 ## Allowance and transport
 

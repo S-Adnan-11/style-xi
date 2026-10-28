@@ -113,7 +113,7 @@ def normalize_match(fixture, body, provenance):
         elif occurrences[pid] != 1:
             reasons.append("ambiguous_duplicate_player")
         minutes = player.get("minutesPlayed")
-        if type(minutes) not in (int, float) or not math.isfinite(minutes) or minutes < 0:
+        if type(minutes) is not int or minutes < 0:
             reasons.append("missing_minutes" if minutes is None else "invalid_minutes")
         else:
             record["minutes"] = minutes

@@ -236,7 +236,10 @@ class Campaign:
         """Read-only, no credentials, no transport and no checkpoint mutations."""
         return self.inspect()[0]
 
-    def run(self, key):
+    def run(self, key, *, max_new_attempts=None):
+        """Run one batch, optionally stopping early for an offline review checkpoint."""
+        if max_new_attempts is not None and (type(max_new_attempts) is not int or max_new_attempts < 1):
+            raise DataError("invalid_invocation_attempt_limit")
         with exclusive(self.account.with_suffix(".run.lock")), exclusive(self.root / "campaign.lock"):
             self.client.run_day = datetime.now(timezone.utc).date().isoformat()
             started = now()
@@ -280,6 +283,8 @@ class Campaign:
                         raise DataError("request_budget_exhausted")
                     if status["daily_usage"] >= 90:
                         raise DataError("daily_account_budget_exhausted")
+                    if max_new_attempts is not None and len(ledger["attempts"]) - before >= max_new_attempts:
+                        raise DataError("invocation_attempt_limit")
                     self.sleeper(self.manifest["interval_seconds"])
                     response = self.client.get(path, params, scope, key, allow_quota_bootstrap=bootstrap_available)
                     bootstrap_available = False
@@ -295,7 +300,7 @@ class Campaign:
                 stop = str(error)
                 fatal = stop not in ("utc_day_boundary", "request_budget_exhausted", "daily_account_budget_exhausted",
                                      "daily_reserve_reached", "current_account_balance_unestablished",
-                                     "field_validation_pause_before_box_collection")
+                                     "field_validation_pause_before_box_collection", "invocation_attempt_limit")
             except Exception:
                 stop, fatal = "unexpected_storage_or_schema_failure_requires_review", True
             if fatal:
