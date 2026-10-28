@@ -10,17 +10,37 @@ Real-player similarity and clustering remain future work.
 
 ## Setup
 
-The existing environment targets standard CPython 3.15.1 on Windows x64:
+Use standard CPython 3.15.1 x64 and Git. Clone the repository, then run commands
+from its root. In Windows PowerShell:
 
 ```powershell
+git clone https://github.com/S-Adnan-11/style-xi.git
+cd style-xi
 py -3.15 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --only-binary=:all: --require-hashes -r requirements.txt
+.\.venv\Scripts\python.exe -m pip --isolated install --index-url https://pypi.org/simple --only-binary=:all: --require-hashes -r requirements.txt
 .\.venv\Scripts\python.exe -m pip check
 ```
 
-Run commands from the repository root. The importer uses Python's standard library;
-the hash-pinned requirements also include the project's numerical and UI libraries.
-Other Python versions and platforms are untested.
+On Linux x86_64 with Python 3.15.1 installed:
+
+```sh
+git clone https://github.com/S-Adnan-11/style-xi.git
+cd style-xi
+python3.15 -m venv .venv
+.venv/bin/python -m pip --isolated install --index-url https://pypi.org/simple --only-binary=:all: --require-hashes -r requirements.txt
+.venv/bin/python -m pip check
+```
+
+Use `.venv/bin/python` in place of `.\.venv\Scripts\python.exe` in the commands
+below on Linux. No environment activation or package installation of this source
+tree is needed. Dependencies download from PyPI during setup; the fictional app
+and examples then run offline.
+
+`requirements.txt` is the shared lock for all runtime dependencies, including the
+numerical and UI libraries. Versions stay the same on both platforms; hashes
+identify the Windows and Linux wheels. The Linux wheels require glibc 2.28 or
+newer. CI checks Windows Server 2025 and Ubuntu 24.04 with standard CPython 3.15.1
+x64. Other Python versions, operating systems and architectures are untested.
 
 ## Local fictional interface
 
@@ -74,6 +94,20 @@ exclusions and provider-manifest coverage. A zero-attempt ratio is unavailable,
 with a reason. Missing metric inputs never become zero or partial full-scope totals.
 See the [metric contract and profile schema](docs/profiles.md) for formulas,
 required fields, definitions and limitations.
+
+For the complete CI check, use a fresh checkout with no `data/` or `outputs/`:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_offline.py
+```
+
+This checks dependencies, imports, the full offline test suite, the documented
+fictional CLI sequence, Streamlit AppTest and a temporary loopback server. It
+removes provider credentials from child environments and detects non-loopback
+Python socket attempts, including DNS lookups. The server is stopped afterward.
+The health check verifies startup; it does not verify browser appearance.
+Generated fictional files remain ignored. The check runs on main-branch pushes
+and pull requests through [Offline checks](https://github.com/S-Adnan-11/style-xi/actions/workflows/offline.yml).
 
 ## Fictional activity comparison
 

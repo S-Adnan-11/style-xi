@@ -1,0 +1,51 @@
+name: Offline checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: offline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline:
+    name: ${{ matrix.os }} / Python 3.15.1
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.15.1'
+          architecture: x64
+      - name: Create clean environment and install locked wheels
+        timeout-minutes: 8
+        run: |
+          python -m venv .venv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $pythonPath = if ($IsWindows) { '.venv/Scripts/python.exe' } else { '.venv/bin/python' }
+          $env:PIP_CONFIG_FILE = if ($IsWindows) { 'NUL' } else { '/dev/null' }
+          & $pythonPath -m pip --isolated install --index-url https://pypi.org/simple --only-binary=:all: --require-hashes -r requirements.txt
+          exit $LASTEXITCODE
+      - name: Verify fictional runtime and full offline suite
+        timeout-minutes: 6
+        run: |
+          $pythonPath = if ($IsWindows) { '.venv/Scripts/python.exe' } else { '.venv/bin/python' }
+          & $pythonPath scripts/check_offline.py
+          exit $LASTEXITCODE
