@@ -4,6 +4,10 @@ Use only data you are entitled to acquire and retain. The tools do not establish
 provider permissions, public display rights or complete competition coverage.
 No raw data is included in the repository.
 
+For a reviewed, fixed five-competition season scope, the [manual campaign workflow](campaign.md)
+adds a persistent overall counter, shared daily accounting and inventory continuation
+to this same downloader. The explicit-plan workflow below retains its 50-call cap.
+
 ## Plan format
 
 The following IDs are fictional. Replace them with inspected provider IDs before

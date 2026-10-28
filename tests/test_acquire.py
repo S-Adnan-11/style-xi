@@ -148,6 +148,15 @@ class AcquisitionTests(unittest.TestCase):
         with self.assertRaisesRegex(DataError, "cache_integrity_failure"):
             self.get(self.client())
         self.assertEqual(self.calls, 1)
+        value["body"]["data"] = [fixture()]
+        for field, altered in (("endpoint", "https://soccer.highlightly.net/box-score/900001"), ("status", 201)):
+            original = value[field]
+            value[field] = altered
+            atomic_json(path, value)
+            with self.assertRaises(DataError):
+                self.get(self.client())
+            value[field] = original
+        self.assertEqual(self.calls, 1)
 
     def test_checkpoint_resume_and_plan_change_guard(self):
         calls = [("/matches", PARAMS, SCOPE)]

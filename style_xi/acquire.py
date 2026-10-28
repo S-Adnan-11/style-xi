@@ -16,6 +16,31 @@ MAX_REQUESTS = 50
 RESERVE = 10
 
 
+def daily_usage(account, attempts, at=None):
+    """Conservative total: local reservations, declared outside use, provider usage."""
+    at = at or datetime.now(timezone.utc)
+    day = at.date().isoformat()
+    try:
+        unique = {(a["request_id"], a["reserved_utc"]) for a in attempts
+                  if datetime.fromisoformat(a["reserved_utc"]).date() == at.date()}
+        outside = account.get("external_usage", {}).get(day, 0)
+        if type(outside) is not int or outside < 0:
+            raise ValueError()
+        local = len(unique) + outside
+        try:
+            remaining = fresh_remaining(account.get("observation", {}), attempts, at)
+        except DataError:
+            remaining = None
+        observed = account.get("daily_usage_floor", {}).get(day, 0)
+        if type(observed) is not int or observed < 0:
+            raise ValueError()
+        if remaining is not None:
+            observed = max(observed, 100 - remaining)
+        return max(local, observed)
+    except (KeyError, TypeError, ValueError):
+        raise DataError("account_daily_history_corrupt") from None
+
+
 def request_identity(path, params):
     if path == "/matches":
         if set(params) != {"leagueId", "season", "limit", "offset"}:
@@ -79,9 +104,16 @@ def fresh_remaining(observation, attempts, at=None):
 
 
 class Downloader:
-    def __init__(self, root, account, cap=MAX_REQUESTS, history=(), transport=send):
-        if type(cap) is not int or not 1 <= cap <= MAX_REQUESTS:
-            raise DataError("request_cap_must_be_1_to_50")
+    def __init__(self, root, account, cap=MAX_REQUESTS, history=(), transport=send,
+                 *, campaign=None, run_day=None):
+        maximum = 1800 if campaign is not None else MAX_REQUESTS
+        if type(cap) is not int or not 1 <= cap <= maximum:
+            raise DataError("request_cap_must_be_1_to_" + str(maximum))
+        self.campaign, self.run_day = campaign, run_day
+        if campaign is not None and (campaign.get("cap") != cap or campaign.get("daily_cap") != 90
+                                     or campaign.get("reserve") != RESERVE
+                                     or not campaign.get("manifest_sha256")):
+            raise DataError("invalid_campaign_policy")
         self.root, self.account = Path(root), Path(account)
         self.cap, self.history, self.transport = cap, tuple(map(Path, history)), transport
         self.budget_id = digest(str(self.root.resolve()))
@@ -96,16 +128,26 @@ class Downloader:
                     or not all(isinstance(a, dict) for a in state["attempts"])
                     or [a.get("number") for a in state["attempts"]] != list(range(1, len(state["attempts"]) + 1))):
                 raise DataError("request_ledger_corrupt_or_cap_changed")
+            if self.campaign is not None and state.get("campaign") != self.campaign:
+                raise DataError("campaign_scope_changed")
             return state
         if (self.root / "responses").exists() and any((self.root / "responses").iterdir()):
             raise DataError("ledger_missing_with_cache")
-        return {"version": 1, "cap": self.cap, "halted": None, "attempts": []}
+        state = {"version": 1, "cap": self.cap, "halted": None, "attempts": []}
+        if self.campaign is not None:
+            state["campaign"] = self.campaign
+        return state
 
     def cached(self, identity):
         matches = sorted((self.root / "responses").glob(identity + ".*.json"))
         if not matches:
             return None
         snapshots = [read_json(p) for p in matches]
+        for snapshot in snapshots:
+            endpoint = snapshot.get("endpoint", "")
+            if (snapshot.get("status") != 200 or not endpoint.startswith("https://" + HOST + "/")
+                    or request_identity(endpoint[len("https://" + HOST):], snapshot.get("parameters", {})) != identity):
+                raise DataError("cache_request_integrity_failure")
         if any(s.get("request_id") != identity or digest(s["body"]) != s.get("stored_body_sha256")
                for s in snapshots):
             raise DataError("cache_integrity_failure")
@@ -161,11 +203,29 @@ class Downloader:
                 raise DataError("budget_ledger_missing_with_account_history")
             for ledger_path in self.history:
                 all_attempts.extend(read_json(ledger_path)["attempts"])
+            # Histories can overlap the shared ledger; one reservation is one debit.
+            all_attempts = list({(a["request_id"], a["reserved_utc"]): a for a in all_attempts}.values())
+            if self.campaign is not None:
+                expected_policy = dict(self.campaign, budget_id=self.budget_id)
+                if account.get("campaign") != expected_policy:
+                    raise DataError("shared_campaign_scope_missing_or_changed")
+                shared = {(a["request_id"], a["reserved_utc"]) for a in account.get("attempts", [])
+                          if a.get("budget_id") == self.budget_id}
+                local = {(a["request_id"], a["reserved_utc"]) for a in state["attempts"]}
+                if shared != local:
+                    raise DataError("uncertain_campaign_reservation_requires_review")
+                if self.run_day != datetime.now(timezone.utc).date().isoformat():
+                    raise DataError("utc_day_boundary")
+            if account.get("campaign") and daily_usage(account, all_attempts) >= 90:
+                raise DataError("daily_account_budget_exhausted")
             bootstrap = False
             try:
                 remaining_before = fresh_remaining(account.get("observation", {}), all_attempts)
             except DataError:
-                if not allow_quota_bootstrap or path != "/matches" or state["attempts"] or state.get("quota_bootstrap_used"):
+                permitted_campaign_bootstrap = (self.campaign is not None
+                    and self.run_day not in state.get("bootstrap_days", []))
+                if not allow_quota_bootstrap or (not permitted_campaign_bootstrap
+                    and (self.campaign is not None or path != "/matches" or state["attempts"] or state.get("quota_bootstrap_used"))):
                     raise
                 # A current malformed balance is contradictory, not an absent/stale observation.
                 observation = account.get("observation", {})
@@ -184,10 +244,16 @@ class Downloader:
                        "scope": scope, "reserved_utc": now(), "outcome": "reserved", "quota_bootstrap": bootstrap}
             state["attempts"].append(attempt)
             if bootstrap:
-                state["quota_bootstrap_used"] = True
+                if self.campaign is not None:
+                    state.setdefault("bootstrap_days", []).append(self.run_day)
+                else:
+                    state["quota_bootstrap_used"] = True
             # Shared reservation first: a crash can overcount, never undercount the account.
             account.setdefault("attempts", []).append({"request_id": identity, "budget_id": self.budget_id,
                                                        "reserved_utc": attempt["reserved_utc"]})
+            if account.get("campaign"):
+                day = datetime.fromisoformat(attempt["reserved_utc"]).date().isoformat()
+                account.setdefault("daily_usage_floor", {})[day] = daily_usage(account, all_attempts) + 1
             atomic_json(self.account, account)
             atomic_json(self.root / "requests.json", state)
             failure_body = None
@@ -199,8 +265,16 @@ class Downloader:
                                if k.startswith("x-ratelimit") or k in ("date", "retry-after", "ratelimit-reset")}, key)
                 attempt["quota"] = quota
                 remaining = headers.get("x-ratelimit-requests-remaining")
-                if remaining is not None and str(remaining).isdigit():
+                quota_valid = remaining is not None and str(remaining).isdigit()
+                if self.campaign is not None:
+                    quota_valid = (quota_valid and headers.get("x-ratelimit-requests-limit") == "100"
+                                   and 0 <= int(remaining) <= 100)
+                if quota_valid:
                     account["observation"] = {"observed_utc": attempt["retrieved_utc"], "remaining": int(remaining), "source": "response_header"}
+                    if account.get("campaign"):
+                        response_day = datetime.fromisoformat(attempt["retrieved_utc"]).date().isoformat()
+                        floor = account.setdefault("daily_usage_floor", {})
+                        floor[response_day] = max(floor.get(response_day, 0), 100 - int(remaining))
                 else:
                     account["observation"] = {}
                 atomic_json(self.account, account)
@@ -234,7 +308,8 @@ class Downloader:
                 attempt.update(outcome="success", snapshot_id=snapshot["stored_body_sha256"])
                 if not account.get("observation"):
                     state["halted"] = account["halted"] = "quota_evidence_missing"
-                elif remaining_before is not None and int(remaining) > remaining_before:
+                elif (remaining_before is not None and int(remaining) > remaining_before
+                      and attempt["reserved_utc"][:10] == attempt["retrieved_utc"][:10]):
                     state["halted"] = account["halted"] = "contradictory_quota_increase"
                 atomic_json(self.account, account)
                 atomic_json(self.root / "requests.json", state)

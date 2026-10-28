@@ -30,7 +30,9 @@ def inspect_pages(snapshots, acquired=()):
                 issues.add("invalid_pagination")
                 continue
             totals.add(total)
-            if params.get("offset") != offset or params.get("limit") != limit:
+            # Providers may enforce a smaller effective page size. Advance by it.
+            if (params.get("offset") != offset or type(params.get("limit")) is not int
+                    or not 0 < limit <= params["limit"]):
                 issues.add("pagination_request_mismatch")
             if len(rows) != min(limit, max(0, total - offset)):
                 issues.add("empty_or_incomplete_page")
