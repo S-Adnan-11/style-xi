@@ -63,6 +63,10 @@ appearances and v2 rates. Comparison cards stack on mobile. **Remove** deletes o
 saved sample; **Clear shortlist** starts over. **Fictional demo** and the provisional
 eligibility criteria remain visible above search.
 
+Add a short note to each saved player to remember why you picked them. Notes stay
+in the current session when you change the reference. Removing a player or clearing
+the shortlist removes their notes too.
+
 The shortlist lasts for the current Streamlit session. Changing the reference
 player keeps saved samples and recalculates their distances with the same fixed
 fit. Search filters leave the shortlist available, including searches with zero

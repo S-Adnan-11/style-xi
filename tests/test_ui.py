@@ -11,7 +11,8 @@ from streamlit.testing.v1 import AppTest
 
 from style_xi.similarity import parse_selector, rank_candidates
 from style_xi.storage import digest
-from style_xi.ui import _save_comparison_selection, contributor_text, demo_data, neighbour_rows
+from style_xi.ui import (MAX_NOTE_LENGTH, _save_comparison_selection, _save_shortlist_note,
+                         contributor_text, demo_data, neighbour_rows)
 
 APP = Path(__file__).resolve().parents[1] / "app.py"
 
@@ -226,6 +227,61 @@ class InterfaceTests(unittest.TestCase):
             self.assertEqual(state["comparison_selection"], selected)
             _save_comparison_selection("comparison_picker_3")
             self.assertEqual(state["comparison_selection"], selected[1:])
+
+    def test_shortlist_notes_edit_independently_and_survive_reference_and_search_changes(self):
+        app = self.app()
+        for player in (901202, 901205):
+            app.button(key=action_key("add", player)).click().run()
+        before_fit = digest(demo_data()[2].metadata)
+        before_distance = comparison_cards(app)["Pax Ember"]["Distance from reference"]
+        mira, pax = profile_key(901202), profile_key(901205)
+        app.text_area(key=action_key("note", 901202)).set_value("Close passing pattern; review the duels.").run()
+        app.text_area(key=action_key("note", 901205)).set_value("More shots; keep for a second look.").run()
+        edited = "Passing looks close. Check the recorded exposure next."
+        app.text_area(key=action_key("note", 901202)).set_value(edited).run()
+        self.assertEqual(app.session_state["shortlist_notes"][mira], edited)
+        self.assertEqual(app.session_state["shortlist_notes"][pax], "More shots; keep for a second look.")
+        self.assertEqual(app.text_area(key=action_key("note", 901202)).proto.max_chars, MAX_NOTE_LENGTH)
+        self.assertEqual(comparison_cards(app)["Pax Ember"]["Distance from reference"], before_distance)
+        for reference in (901202, 901207):
+            app.selectbox(key="query").set_value(profile_key(reference)).run()
+            self.assertEqual(app.text_area(key=action_key("note", 901202)).value, edited)
+            self.assertEqual(app.text_area(key=action_key("note", 901205)).value, "More shots; keep for a second look.")
+        app.text_input(key="candidate_search").set_value("no-such-fictional-player").run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["shortlist_notes"][mira], edited)
+        self.assertEqual(digest(demo_data()[2].metadata), before_fit)
+
+    def test_removing_and_clearing_shortlist_remove_notes_and_readding_starts_empty(self):
+        app = self.app()
+        for player in (901202, 901205):
+            app.button(key=action_key("add", player)).click().run()
+            app.text_area(key=action_key("note", player)).set_value("Remember this fictional sample.").run()
+        app.button(key=action_key("remove", 901202)).click().run()
+        self.assertNotIn(profile_key(901202), app.session_state["shortlist_notes"])
+        self.assertNotIn(action_key("note", 901202), app.session_state)
+        self.assertIn(profile_key(901205), app.session_state["shortlist_notes"])
+        app.button(key=action_key("add", 901202)).click().run()
+        self.assertEqual(app.text_area(key=action_key("note", 901202)).value, "")
+        app.button(key="clear_shortlist").click().run()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual(app.session_state["shortlist_notes"], {})
+        self.assertNotIn(action_key("note", 901202), app.session_state)
+        self.assertNotIn(action_key("note", 901205), app.session_state)
+        app.button(key=action_key("add", 901205)).click().run()
+        self.assertEqual(app.text_area(key=action_key("note", 901205)).value, "")
+
+    def test_notes_are_session_only_and_late_edits_cannot_restore_removed_notes(self):
+        app = self.app()
+        app.button(key=action_key("add", 901202)).click().run()
+        app.text_area(key=action_key("note", 901202)).set_value("Only in this session.").run()
+        fresh = self.app()
+        self.assertEqual(fresh.session_state["shortlist_notes"], {})
+        key, widget_key = profile_key(901202), action_key("note", 901202)
+        state = {"saved_shortlist": [], "shortlist_notes": {}, widget_key: "A late edit"}
+        with patch("style_xi.ui.st.session_state", state):
+            _save_shortlist_note(key, widget_key)
+            self.assertEqual(state["shortlist_notes"], {})
 
 
 if __name__ == "__main__":

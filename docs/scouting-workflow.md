@@ -24,6 +24,10 @@ profile code; it needs no provider credentials, private cache or generated files
    selects all saved candidates. Cards show the reference alongside their minutes,
    appearances, distances and four v2 per-90 rates. They stack into complete cards
    on mobile. Adjust the comparison selection without deleting saved samples.
+   Write up to 240 characters in **Note for Mira Reed** to remember why you saved
+   that player. Click away or press Ctrl+Enter to apply an edit. Notes stay with
+   each saved sample when you search or change the reference, including an
+   ineligible reference.
 4. Candidate cards describe their two largest distance features in plain language,
    such as “More recorded duels; higher pass rate.” These compare per-90 rates with
    the reference and use the engine's existing top-two feature selection. Expand
@@ -45,8 +49,9 @@ profile code; it needs no provider credentials, private cache or generated files
 7. Choose **Rumi Mist** as the reference player. The comparison warning explains
    the missing inputs. Saved rates remain visible, and candidate distances become
    unavailable. Changing back to an eligible reference recalculates the distances.
-8. Use **Remove Mira Reed**, **Remove Pax Ember**, or **Clear shortlist**. An empty
-   shortlist explains how to add a result again.
+8. Use **Remove Mira Reed**, **Remove Pax Ember**, or **Clear shortlist**. These
+   actions remove the saved samples and their notes. Adding the player again starts
+   with an empty note. An empty shortlist explains how to add a result again.
 
 Saved entries belong to the current Streamlit session and use the full provider,
 competition, season, stage, club and player identity. Search and reference changes

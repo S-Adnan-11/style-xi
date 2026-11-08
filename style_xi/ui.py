@@ -11,6 +11,7 @@ from .similarity import FEATURES, fit_reference, identity, rank_candidates, sele
 
 LABELS = {"passes_per_90": "Passes / 90", "dribbles_per_90": "Dribbles / 90",
           "duels_per_90": "Provider-recorded duels / 90", "shots_per_90": "Shots excluding blocks / 90"}
+MAX_NOTE_LENGTH = 240
 DRIVERS = {
     "passes_per_90": ("Higher pass rate", "Lower pass rate", "Matching pass rate"),
     "dribbles_per_90": ("More dribble attempts", "Fewer dribble attempts", "Matching dribble rate"),
@@ -94,18 +95,29 @@ def _add_to_shortlist(key):
         st.session_state.comparison_revision += 1
     if key not in st.session_state.comparison_selection:
         st.session_state.comparison_selection = [*st.session_state.comparison_selection, key]
+    st.session_state.shortlist_notes.setdefault(key, "")
 
 
 def _remove_from_shortlist(key):
     st.session_state.saved_shortlist = [k for k in st.session_state.saved_shortlist if k != key]
     st.session_state.comparison_selection = [k for k in st.session_state.comparison_selection if k != key]
     st.session_state.comparison_revision += 1
+    st.session_state.shortlist_notes.pop(key, None)
+    st.session_state.pop(_key("note", key), None)
 
 
 def _clear_shortlist():
+    for key in st.session_state.saved_shortlist:
+        st.session_state.pop(_key("note", key), None)
     st.session_state.saved_shortlist = []
     st.session_state.comparison_selection = []
     st.session_state.comparison_revision += 1
+    st.session_state.shortlist_notes = {}
+
+
+def _save_shortlist_note(key, widget_key):
+    if key in st.session_state["saved_shortlist"]:
+        st.session_state["shortlist_notes"][key] = st.session_state[widget_key]
 
 
 def _save_comparison_selection(widget_key):
@@ -228,6 +240,12 @@ def _render_shortlist(document, fit, profile, profiles):
                 st.caption("Distance unavailable because the reference sample is ineligible. Recorded rates remain visible below.")
             else:
                 _show_eligibility(details[key])
+            note_key = _key("note", key)
+            st.text_area("Note for " + player_name(candidate), key=note_key,
+                         value=st.session_state.shortlist_notes.get(key, ""),
+                         placeholder="Why did you save this player?", max_chars=MAX_NOTE_LENGTH, height=88,
+                         help="Only kept for this session. Removing the player or clearing the shortlist removes the note.",
+                         on_change=_save_shortlist_note, args=(key, note_key))
             st.button("Remove " + player_name(candidate), key=_key("remove", key), on_click=_remove_from_shortlist, args=(key,))
     st.button("Clear shortlist", key="clear_shortlist", on_click=_clear_shortlist)
     return pairs
@@ -305,6 +323,7 @@ def render_app():
     st.session_state.setdefault("saved_shortlist", [])
     st.session_state.setdefault("comparison_selection", [])
     st.session_state.setdefault("comparison_revision", 0)
+    st.session_state.setdefault("shortlist_notes", {})
     choices = sorted(profiles, key=lambda key: profile_label(profiles[key]))
     default = next(key for key in choices if key[-1] == 901201 and key[-2] == 900101 and key[3] == "regular")
     with st.container(key="reference_strip"):
