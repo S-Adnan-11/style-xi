@@ -5,7 +5,7 @@ from copy import deepcopy
 from .normalize import CORE
 from .pipeline import replay_envelopes
 from .profiles import build_profiles
-from .similarity import selector
+from .similarity import METHOD_VERSION, method_features, selector
 
 
 def fixture(match=900001, team=900101, season=2025, stage="Regular Season - 1"):
@@ -20,8 +20,9 @@ def player(pid=900201, minutes=90):
     return {"id": pid, "minutesPlayed": minutes, "statistics": counts}
 
 
-def comparison_snapshots():
+def comparison_snapshots(method_version=METHOD_VERSION):
     """A declared fictional midfield example; role membership is not inferred."""
+    method_features(method_version)
     patterns = [
         (901201, "Lumen Ash", (40, 4, 2, 2)),
         (901202, "Mira Reed", (42, 4, 2, 2)),
@@ -43,6 +44,11 @@ def comparison_snapshots():
             "passesTotal": passes, "passesSuccessful": passes, "passesFailed": 0,
             "dribblesTotal": dribbles, "dribblesSuccessful": dribbles, "dribblesFailed": 0,
             "tacklesTotal": tackles, "shotsTotal": shots, "shotsOnTarget": shots, "shotsOffTarget": 0}
+        if method_version == 2:
+            # Independent fictional source counts; do not relabel tackles as duels.
+            duels = {901201: 10, 901202: 12, 901203: 12, 901204: 20, 901205: 4,
+                     901206: 0, 901207: 8, 901208: 2, 901209: 5}[pid] if minutes else 0
+            result["statistics"].update(duelsTotal=duels, duelsWon=duels // 2, duelsLost=duels - duels // 2)
         return result
 
     matches = [fixture(match=901001), fixture(match=901002),
@@ -67,13 +73,14 @@ def comparison_snapshots():
     return snapshots
 
 
-def profiles_from_fictional_import(imported):
+def profiles_from_fictional_import(imported, *, method_version=METHOD_VERSION, match_holds=None):
     """Apply the labelled synthetic missingness case without changing raw import."""
     working = deepcopy(imported)
     for row in working["player_matches"]:
         if row["player_id"] == 901207 and row["match_id"] == 901002:
             del row["counts"]["dribblesTotal"]
-    profiles = build_profiles(working)
+    method_features(method_version)
+    profiles = build_profiles(working, match_holds=match_holds)
     profiles["fictional_example"] = {
         "role_group": "Declared fictional central-midfield examples; no role inferred from counts",
         "missingness_scenario": "One Rumi dribble count intentionally removed after validation to test the profile boundary; not a raw-validator acceptance claim."}
@@ -87,6 +94,7 @@ def profiles_from_fictional_import(imported):
     return profiles, cohort
 
 
-def fictional_example():
+def fictional_example(method_version=METHOD_VERSION):
     """Build reviewed fictional profiles in memory: no paths, credentials or I/O."""
-    return profiles_from_fictional_import(replay_envelopes(comparison_snapshots()))
+    return profiles_from_fictional_import(replay_envelopes(comparison_snapshots(method_version)),
+                                          method_version=method_version)

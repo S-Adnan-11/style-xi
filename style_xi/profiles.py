@@ -6,6 +6,7 @@ import math
 from .normalize import (CORE, PROFILE_IDENTITY, aggregate, display_name, mapping,
                         positive_id, valid_count, valid_minutes)
 from .storage import DataError, atomic_json, digest, read_json
+from .holds import held_matches
 
 # Stable keys and source inputs. No generic numeric-field discovery is used.
 FAMILIES = (
@@ -166,7 +167,7 @@ def _coverage(document, key, rows, excluded):
             "unattributed_match_diagnostics_total": len(document.get("match_diagnostics", []))}
 
 
-def build_profiles(document):
+def build_profiles(document, *, match_holds=None):
     """Build a standalone versioned profile document from an import result.
 
     The importer's acceptance policy remains authoritative. Defensively missing or
@@ -175,12 +176,18 @@ def build_profiles(document):
     if (not isinstance(document, dict) or document.get("schema_version") != 1
             or not isinstance(document.get("player_matches"), list)):
         raise DataError("unsupported_profile_input_schema")
+    holds = held_matches(match_holds)
     groups, originals, exclusions = defaultdict(dict), defaultdict(list), defaultdict(list)
+    held_rows = defaultdict(dict)
     for row in document["player_matches"]:
         if not isinstance(row, dict) or row.get("status") != "accepted":
             raise DataError("profile_input_requires_accepted_records")
         key = _identity(row)
         mid = row["match_id"]
+        if (row["provider"], mid) in holds:
+            # Filter before aggregation, including exposure and per-metric denominators.
+            held_rows[key][mid] = row
+            continue
         prior = groups[key].get(mid)
         if prior is not None and _fingerprint(prior) != _fingerprint(row):
             raise DataError("conflicting_profile_player_match_records")
@@ -192,23 +199,29 @@ def build_profiles(document):
         except (DataError, AttributeError):
             continue  # Unattributable exclusions remain in the import result.
         exclusions[key].append(row)
+    for key, matches in held_rows.items():
+        exclusions[key].extend({**row, "status": "excluded", "reasons": ["match_analytical_hold"]}
+                               for _, row in sorted(matches.items()))
     profiles = []
     contract = metric_contract()
-    for key in sorted(groups):
+    for key in sorted(set(groups) | set(held_rows)):
         rows = [groups[key][mid] for mid in sorted(groups[key])]
-        totals = aggregate(rows)[0]
+        totals = aggregate(rows)[0] if rows else {"minutes": 0, "counts": {}, "contributing_matches": []}
         names = {}
         for entity in ("player", "team", "competition"):
             names[entity] = sorted({value for row in originals[key] + exclusions[key]
                                     if (value := display_name(row.get(entity + "_name"))) is not None})
+        coverage = _coverage(document, key, rows, exclusions[key])
+        if match_holds is not None:
+            coverage.update(held_player_matches=len(held_rows[key]), held_match_ids=sorted(held_rows[key]))
         profiles.append({**dict(zip(PROFILE_IDENTITY, key)), "display_names": names,
                          "scope": "accepted_recorded_matches_incomplete_sample",
                          "accepted_minutes": totals["minutes"], "accepted_appearances": len(rows),
                          "contributing_match_ids": totals["contributing_matches"],
                          "source_snapshot_ids": sorted({p["snapshot_id"] for r in originals[key] for p in r.get("provenance", [])}),
-                         "coverage": _coverage(document, key, rows, exclusions[key]),
+                         "coverage": coverage,
                          "metrics": {name: calculate_metric(rows, totals, spec) for name, spec in contract.items()}})
-    return {"schema_version": 1, "kind": "accepted_match_sample_profiles", "metric_contract_version": 1,
+    result = {"schema_version": 1, "kind": "accepted_match_sample_profiles", "metric_contract_version": 1,
             "scope": "accepted_recorded_matches_incomplete_sample",
             "validation": {"independent_accuracy": "not_established", "full_season_coverage": "not_established"},
             "source_field_semantics_version": 1, "source_field_semantics": source_field_semantics(),
@@ -217,10 +230,18 @@ def build_profiles(document):
                         "excluded_records_in_input": len(document.get("excluded_records", [])),
                         "unattributed_match_diagnostics": len(document.get("match_diagnostics", []))},
             "profiles": profiles}
+    if match_holds is not None:
+        result["match_hold_policy"] = {
+            "version": 1, "registry_sha256": digest(match_holds), "applied_before_aggregation": True,
+            "held_matches": [{"provider": provider, "match_id": mid} for provider, mid in sorted(holds)],
+            "excluded_accepted_player_matches": sum(len(rows) for rows in held_rows.values()),
+            "held_only_profiles_retained": True}
+    return result
 
 
-def profile_file(input_file, output_file):
-    result = build_profiles(read_json(input_file))
+def profile_file(input_file, output_file, *, match_holds_file=None):
+    result = build_profiles(read_json(input_file),
+                            match_holds=read_json(match_holds_file) if match_holds_file is not None else None)
     atomic_json(output_file, result)
     return result
 

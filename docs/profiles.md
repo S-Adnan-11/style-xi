@@ -79,8 +79,10 @@ and incomplete rows. Recorded zero alone is not independent proof of nonappearan
 No minute correction or real-rate eligibility threshold is established here. Future
 analysis needs sufficient exposure, a reviewed role/goalkeeper policy, stable
 source semantics and a method that avoids undefined inputs. Private raw import and
-profile computation do not make real comparisons or integration ready. The fictional
-four-feature method and weights remain unchanged; duels are only a later candidate.
+profile computation do not make real comparisons or integration ready. Fictional method
+version 2 uses provider-recorded duels in place of tackles with four equal weights;
+version 1 remains reproducible. See [the comparison contract](similarity.md). No
+real-player exposure policy is established.
 
 Units and formulas:
 
@@ -176,3 +178,25 @@ fields never enter the profile metric contract or calculation. Goal/assist outco
 metrics and additional efficiencies are not selected for this first profile set.
 These profiles do not establish independent data accuracy, complete seasons,
 validated player similarity or scouting conclusions.
+
+
+## Explicit match holds before aggregation
+
+`build_profiles(import_result, match_holds=registry)` or profiles CLI
+`--match-holds <holds.json>` applies a version-1 registry before aggregation:
+
+```json
+{"version": 1, "cases": {"920002": {"match_id": 920002, "provider": "highlightly", "hold_scope": "match", "analytical_use_allowed": false}}}
+```
+
+Provider-less cases in the existing registry default to `highlightly`; explicit
+providers prevent cross-provider exclusions. Invalid registries fail closed. A case
+is released only by explicit `analytical_use_allowed: true`; acquisition success does
+not release it. Both teams' held rows contribute zero actions, minutes and appearances,
+including metric denominators and contributing provenance. Held-only players remain
+visible with zero exposure and `no_accepted_records` metrics rather than invented zero
+rates. Coverage retains held match IDs and `match_analytical_hold` reasons. A
+`match_hold_policy` records the registry digest and excluded accepted-row count. Inputs
+and source values stay unchanged. No file is loaded implicitly; omitting the option
+preserves historical calculations. Rebuild old profiles from their import to apply a
+registry before aggregation.

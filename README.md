@@ -6,7 +6,7 @@ records and produces explainable sample profiles with counts, actions per 90,
 supported success percentages and explicit field and match coverage.
 A fictional nearest-neighbour prototype compares activity patterns and explains each
 distance. A local Streamlit interface presents this fictional comparison.
-Real-player similarity and clustering remain future work.
+Real-player similarity and integration remain blocked; clustering remains future work.
 
 ## Setup
 
@@ -51,9 +51,25 @@ From the repository root, start the app:
 ```
 
 Open <http://127.0.0.1:8501>. Stop the app with **Ctrl+C** in that terminal.
-Choose a player, review the recorded sample, then choose a neighbour for the
-side-by-side rates. Expand the details for coverage, exclusions and the calculation.
-Equal distances share a group; display order does not break a tie.
+Choose a **Reference player** and review the compact minutes/appearances summary.
+Search candidates by player or club name and use each candidate's **Add** button.
+The shortlist count stays beside search. Candidate cards describe their two biggest
+rate differences in plain language; **Details** contains precise contributions.
+Full reference rates and coverage are under **Reference stats and method**.
+
+The shortlist appears beside results on desktop and below them on narrow screens.
+Save multiple samples, select **Players to compare**, and review their minutes,
+appearances and v2 rates. Comparison cards stack on mobile. **Remove** deletes one
+saved sample; **Clear shortlist** starts over. **Fictional demo** and the provisional
+eligibility criteria remain visible above search.
+
+The shortlist lasts for the current Streamlit session. Changing the reference
+player keeps saved samples and recalculates their distances with the same fixed
+fit. Search filters leave the shortlist available, including searches with zero
+eligible candidates. An ineligible reference keeps recorded rates visible and
+marks candidate distances unavailable. Expand exclusions for actual exposure,
+thresholds and missing-input coverage. Equal distances share a group; display order
+does not break a tie. See [the fictional scouting walkthrough](docs/scouting-workflow.md).
 
 The app builds the reviewed fictional examples in memory. It needs no credential,
 private cache, generated output or network connection. Players, clubs and statistics
@@ -61,6 +77,9 @@ are invented. The reference and the example's minimum of 90 minutes and two
 appearances stay fixed when selections change. Ineligible examples remain selectable
 so their unavailable inputs and exclusion reasons can be inspected.
 
+The interface uses version 2: passes, dribbles, provider-recorded duels and **Shots
+excluding blocks**, with visible feature contributions. Its 90-minute and two-appearance
+thresholds are provisional demonstration settings.
 The interface uses the same package functions as the CLI. It has no real-data mode,
 provider controls or data exports. Streamlit usage-statistics collection is disabled
 in the local configuration.
@@ -118,8 +137,10 @@ and pull requests through [Offline checks](https://github.com/S-Adnan-11/style-x
 
 This example uses the existing importer and profile functions with fictional match
 counts. Its declared reference has five fictional midfield examples in one competition,
-season and regular-season stage. The fixed features are passes, dribbles, tackles and
-shots per 90, with equal family weights. The result includes reference means/scales,
+season and regular-season stage. Version 2 uses passes, dribbles, provider-recorded duels
+and shots excluding blocks per 90, with equal family weights. Version 1 preserves the
+original tackle feature and fictional source inputs; [reproduction commands](docs/similarity.md#revision-and-original-method-reproduction)
+keep its output reproducible. The result includes reference means/scales,
 eligibility decisions, raw and standardized deltas and each squared-distance contribution.
 **Lower distance means closer recorded activity patterns**, not greater player ability.
 
@@ -130,6 +151,27 @@ after raw validation to exercise the existing profile missingness boundary. Raw-
 acceptance rules remain unchanged. All generated files are ignored and require no
 credentials, private files or network. See [the comparison contract](docs/similarity.md)
 for the numerical method, cohort format, limitations and reusable API.
+
+## Offline fictional stability check
+
+```powershell
+.\.venv\Scripts\python.exe examples/stability_demo.py
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_stability.py -v
+```
+
+This reuses the importer and profile aggregation with six invented matches and an
+explicit `2025-07-01` date cutoff. Each player-team sample stays in its provider,
+league, season and stage. Earlier and later windows must independently meet the
+candidate screen of **180 recorded minutes and three appearances**, with complete
+v2 inputs. Match holds apply before splitting and aggregation.
+
+The fictional player records 90 passes in 180 earlier minutes and 108 in 180 later
+minutes: **45 and 54 per 90, an absolute change of 9**. Holding one earlier match
+leaves 120 minutes/two appearances and makes that window ineligible. JSON reports
+under `outputs/stability/` show qualifying counts, window-specific failures and
+absolute-change distributions for passes, dribbles, duels and shots excluding
+blocks. See [the stability contract](docs/stability.md) for the API and limitations.
+The screen remains a research candidate; real-player analysis stays gated.
 
 ## Bounded acquisition
 

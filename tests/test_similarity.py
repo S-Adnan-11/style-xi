@@ -112,27 +112,27 @@ class NumericalComparisonTests(unittest.TestCase):
 
     def test_global_constant_drop_renormalization_and_raw_difference_visibility(self):
         for p in self.document["profiles"]:
-            p["metrics"]["tackles_per_90"]["value"] = 3
+            p["metrics"]["duels_per_90"]["value"] = 3
         fit = self.fit()
-        self.assertEqual(fit.metadata["inactive_features"], ["tackles_per_90"])
-        self.assertEqual(fit.metadata["scaling"]["tackles_per_90"]["weight"], 0)
+        self.assertEqual(fit.metadata["inactive_features"], ["duels_per_90"])
+        self.assertEqual(fit.metadata["scaling"]["duels_per_90"]["weight"], 0)
         self.assertAlmostEqual(fit.metadata["scaling"]["passes_per_90"]["weight"], 1 / 3)
         candidate = deepcopy(self.document["profiles"][1])
-        candidate["metrics"]["tackles_per_90"]["value"] = 103
+        candidate["metrics"]["duels_per_90"]["value"] = 103
         pair = explain_pair(fit, self.document["profiles"][0], candidate)
-        self.assertEqual(pair["inactive_feature_differences"], ["tackles_per_90"])
+        self.assertEqual(pair["inactive_feature_differences"], ["duels_per_90"])
         inactive = pair["features"][2]
         self.assertEqual(inactive["raw_delta"], 100)
         self.assertIsNone(inactive["standardized_delta"])
         self.assertEqual(inactive["squared_distance_contribution"], 0)
-        del self.document["profiles"][1]["metrics"]["tackles_per_90"]
+        del self.document["profiles"][1]["metrics"]["duels_per_90"]
         missing = self.rank(fit)
-        self.assertIn("missing_feature:tackles_per_90", missing["exclusion_reason_counts"])
+        self.assertIn("missing_feature:duels_per_90", missing["exclusion_reason_counts"])
 
     def test_effectively_constant_policy_and_minimum_varying_feature_guard(self):
         for index, p in enumerate(self.document["profiles"]):
-            p["metrics"]["tackles_per_90"]["value"] = 1 + index * 1e-14
-        self.assertIn("tackles_per_90", self.fit().metadata["inactive_features"])
+            p["metrics"]["duels_per_90"]["value"] = 1 + index * 1e-14
+        self.assertIn("duels_per_90", self.fit().metadata["inactive_features"])
         for p in self.document["profiles"]:
             for key in ("passes_per_90", "dribbles_per_90"):
                 p["metrics"][key]["value"] = 0
@@ -261,7 +261,7 @@ class FictionalPipelineTests(unittest.TestCase):
             fit = fit_reference(document, cohort)
             result = rank_candidates(fit, document, query, cohort["candidates"])
             self.assertEqual([n["candidate"]["identity"]["player_id"] for n in result["neighbours"]],
-                             [901202, 901203, 901206, 901204, 901205])
+                             [901202, 901203, 901204, 901206, 901205])
             self.assertEqual(result["neighbours"][0]["distance"], result["neighbours"][1]["distance"])
             self.assertEqual(result["exclusion_reason_counts"]["same_player"], 3)
             self.assertEqual(result["exclusion_reason_counts"]["missing_feature:dribbles_per_90"], 1)
@@ -273,7 +273,7 @@ class FictionalPipelineTests(unittest.TestCase):
             other = rank_candidates(fit, document, different_query, cohort["candidates"])
             self.assertEqual(result["fit"], other["fit"])
             reverse_pair = next(n for n in other["neighbours"] if n["candidate"]["identity"]["player_id"] == 901201)
-            self.assertEqual(reverse_pair["distance"], result["neighbours"][2]["distance"])
+            self.assertEqual(reverse_pair["distance"], next(n["distance"] for n in result["neighbours"] if n["candidate"]["identity"]["player_id"] == 901206))
             json.dumps(result, allow_nan=False)
             # The reusable generator is resumable even after its cohort file exists.
             again, _ = make_example(Path(temp) / "data", Path(temp) / "outputs")

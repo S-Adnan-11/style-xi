@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -120,21 +121,46 @@ for attempt in (
         run("-m", "style_xi", "import-cache", "--input", "data/synthetic", "--output", "outputs/sample.json")
         run("-m", "style_xi", "profiles", "--input", "outputs/sample.json", "--output", "outputs/profiles.json")
         assert "fictional" in run("examples/similarity_demo.py")
+        assert "fictional" in run("examples/stability_demo.py")
         comparison = run("-m", "style_xi", "compare", "--input", "outputs/fictional-profiles.json",
+                         "--method-version", "2",
                          "--cohort", "data/similarity/cohort.json", "--query",
                          "highlightly/900301/2025/regular/900101/901201", "--min-minutes", "90",
                          "--min-appearances", "2", "--limit", "5", "--output", "outputs/neighbours.json")
         assert "Fictional activity comparison" in comparison
-        for path in (ROOT / "outputs").glob("*.json"):
+        assert "Shots excluding blocks" in comparison
+        run("examples/similarity_demo.py", "--method-version", "1", "--directory", "data/similarity-v1",
+            "--output", "outputs/v1")
+        run("-m", "style_xi", "compare", "--method-version", "1", "--input", "outputs/v1/fictional-profiles.json",
+            "--cohort", "data/similarity-v1/cohort.json", "--query", "highlightly/900301/2025/regular/900101/901201",
+            "--output", "outputs/v1/neighbours.json")
+        for path in (ROOT / "outputs").rglob("*.json"):
             finite_json(path)
         profiles = finite_json(ROOT / "outputs/profiles.json")
+        stability = finite_json(ROOT / "outputs/stability/fictional-stability.json")
+        held_stability = finite_json(ROOT / "outputs/stability/fictional-stability-held.json")
+        assert stability["summary"]["qualifying_samples"] == 1
+        assert stability["samples"][0]["absolute_changes"]["passes_per_90"] == 9
+        assert held_stability["summary"]["qualifying_samples"] == 0
+        assert held_stability["samples"][0]["failed_windows"] == ["earlier"]
+        assert not stability["real_player_rankings_allowed"] and not stability["real_integration_allowed"]
         aster = next(p for p in profiles["profiles"] if p["player_id"] == 900201
                      and p["team_id"] == 900101 and p["stage"] == "regular")
         assert aster["metrics"]["passes_per_90"]["value"] == 75
         assert aster["metrics"]["passes_success_pct"]["value"] == 82
         neighbours = finite_json(ROOT / "outputs/neighbours.json")
+        assert neighbours["fit"]["contract_version"] == 2
+        assert neighbours["fit"]["threshold_status"] == "provisional_demonstration_only"
+        assert not neighbours["fit"]["real_player_rankings_allowed"]
+        assert neighbours["fit"]["features"][2]["key"] == "duels_per_90"
+        for neighbour in neighbours["neighbours"]:
+            assert math.isclose(math.fsum(f["squared_distance_contribution"] for f in neighbour["features"]),
+                                neighbour["distance"] ** 2)
+        legacy = finite_json(ROOT / "outputs/v1/neighbours.json")
+        assert legacy["fit"]["contract_version"] == 1
+        assert legacy["fit"]["features"][2]["key"] == "tackles_per_90"
         assert [n["candidate"]["identity"]["player_id"] for n in neighbours["neighbours"]] == [
-            901202, 901203, 901206, 901204, 901205]
+            901202, 901203, 901204, 901206, 901205]
         assert neighbours["neighbours"][0]["distance"] == neighbours["neighbours"][1]["distance"]
         run("-m", "unittest", "discover", "-s", "tests", "-v")
         no_attempts()

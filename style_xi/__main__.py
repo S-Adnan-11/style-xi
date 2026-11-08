@@ -22,6 +22,7 @@ def main(argv=None):
     profiles = commands.add_parser("profiles", help="Build explainable profiles from an offline import result")
     profiles.add_argument("--input", type=Path, required=True)
     profiles.add_argument("--output", type=Path, required=True)
+    profiles.add_argument("--match-holds", type=Path, help="Explicit version-1 match hold registry, applied before aggregation")
     compare = commands.add_parser("compare", help="Compare declared fictional profiles using one fixed reference cohort")
     compare.add_argument("--input", type=Path, required=True)
     compare.add_argument("--cohort", type=Path, required=True)
@@ -30,6 +31,7 @@ def main(argv=None):
     compare.add_argument("--min-minutes", type=float, default=90)
     compare.add_argument("--min-appearances", type=int, default=2)
     compare.add_argument("--limit", type=int, default=5)
+    compare.add_argument("--method-version", type=int, choices=(1, 2), default=2)
     acquire = commands.add_parser("acquire", help="Inspect or run a bounded explicit request plan")
     acquire.add_argument("--plan", type=Path, required=True)
     acquire.add_argument("--state", type=Path, required=True)
@@ -43,10 +45,11 @@ def main(argv=None):
             result = import_cache(args.input, args.output)
             print(json.dumps(result["summary"], sort_keys=True))
         elif args.command == "profiles":
-            print(readable_summary(profile_file(args.input, args.output)))
+            print(readable_summary(profile_file(args.input, args.output, match_holds_file=args.match_holds)))
         elif args.command == "compare":
             print(readable_comparison(compare_file(args.input, args.cohort, parse_selector(args.query), args.output,
-                                                  args.min_minutes, args.min_appearances, args.limit)))
+                                                  args.min_minutes, args.min_appearances, args.limit,
+                                                  method_version=args.method_version)))
         else:
             client = Downloader(args.state, args.account, args.cap, args.account_history)
             calls = read_plan(args.plan)

@@ -7,12 +7,20 @@ import math
 from .normalize import PROFILE_IDENTITY, mapping, positive_id
 from .storage import DataError, atomic_json, canonical, digest, read_json
 
-FEATURES = (
+LEGACY_FEATURES = (
     ("passes_per_90", "passing", "Recorded passes per 90 player minutes"),
     ("dribbles_per_90", "dribbling", "Recorded dribble attempts per 90 player minutes"),
     ("tackles_per_90", "defending", "Recorded tackles per 90 player minutes"),
     ("shots_per_90", "shooting", "Provider-total shots per 90 player minutes"),
 )
+FEATURES = (
+    LEGACY_FEATURES[0], LEGACY_FEATURES[1],
+    ("duels_per_90", "duels", "Provider-recorded duel contests per 90 recorded player minutes; no cross-supplier equivalence established"),
+    ("shots_per_90", "shooting", "On-target plus off-target player shots excluding blocked attempts per 90 recorded player minutes"),
+)
+METHOD_VERSION = 2
+LABELS = {"passes_per_90": "Passes", "dribbles_per_90": "Dribbles",
+          "duels_per_90": "Provider-recorded duels", "shots_per_90": "Shots excluding blocks"}
 EFFICIENCY = ("passes_success_pct", "dribbles_success_pct", "duels_success_pct")
 UNIT = "actions_per_90_minutes"
 CONSTANT_RELATIVE_TOLERANCE = 1e-12
@@ -25,9 +33,19 @@ LIMITATIONS = [
 ]
 
 
-def feature_contract():
-    return [{"key": key, "family": family, "unit": UNIT, "definition": definition, "weight": 0.25}
-            for key, family, definition in FEATURES]
+def method_features(method_version=METHOD_VERSION):
+    if type(method_version) is not int or method_version not in (1, 2):
+        raise DataError("unsupported_comparison_method_version")
+    return LEGACY_FEATURES if method_version == 1 else FEATURES
+
+
+def feature_contract(method_version=METHOD_VERSION):
+    contract = [{"key": key, "family": family, "unit": UNIT, "definition": definition, "weight": 0.25}
+                for key, family, definition in method_features(method_version)]
+    if method_version == 2:
+        for feature in contract:
+            feature["label"] = LABELS[feature["key"]]
+    return contract
 
 
 def identity(value):
@@ -117,7 +135,7 @@ def _selectors(values):
     return [keyed[k] for k in sorted(keyed)]
 
 
-def eligibility(profile, cohort, settings):
+def eligibility(profile, cohort, settings, method_version=METHOD_VERSION):
     """All original required features remain mandatory, including inactive ones."""
     reasons = []
     if any(profile[k] != value for k, value in cohort["scope"].items()):
@@ -145,7 +163,7 @@ def eligibility(profile, cohort, settings):
         reasons.append("inconsistent_exposure_metadata")
     metrics = profile.get("metrics", {})
     metrics = metrics if isinstance(metrics, dict) else {}
-    for key, _, _ in FEATURES:
+    for key, _, _ in method_features(method_version):
         metric = metrics.get(key)
         if not isinstance(metric, dict) or metric.get("value") is None:
             reasons.append("missing_feature:" + key)
@@ -193,7 +211,8 @@ class ReferenceFit:
         return json.loads(self._metadata)
 
 
-def fit_reference(document, cohort, min_minutes=90, min_appearances=2):
+def fit_reference(document, cohort, min_minutes=90, min_appearances=2, *, method_version=METHOD_VERSION):
+    features = method_features(method_version)
     declared = _cohort(cohort)
     settings = _settings(min_minutes, min_appearances)
     index = _index(document)
@@ -204,49 +223,82 @@ def fit_reference(document, cohort, min_minutes=90, min_appearances=2):
     eligible, exclusions = [], []
     for requested in references:
         profile = index.get(identity(requested))
-        reasons = eligibility(profile, declared, settings) if profile is not None else ["profile_not_found"]
+        reasons = eligibility(profile, declared, settings, method_version) if profile is not None else ["profile_not_found"]
         if reasons:
             exclusions.append({"identity": requested, "reasons": reasons})
+            if method_version == 2:
+                exclusions[-1]["eligibility"] = eligibility_details(profile, declared, settings, reasons)
         else:
             eligible.append(profile)
     if len(eligible) < 3:
         raise DataError("at_least_three_eligible_reference_profiles_required")
     statistics = {}
-    for key, _, _ in FEATURES:
+    for key, _, _ in features:
         mean, std, active = _population([float(p["metrics"][key]["value"]) for p in eligible])
         statistics[key] = {"mean": mean, "population_std": std, "active": active}
-    active = [key for key, _, _ in FEATURES if statistics[key]["active"]]
+    active = [key for key, _, _ in features if statistics[key]["active"]]
     if len(active) < 2:
         raise DataError("at_least_two_varying_reference_features_required")
-    for key, _, _ in FEATURES:
+    for key, _, _ in features:
         statistics[key]["weight"] = 1 / len(active) if key in active else 0.0
-    reference_data = [{"identity": selector(p), "values": [p["metrics"][key]["value"] for key, _, _ in FEATURES]}
+    reference_data = [{"identity": selector(p), "values": [p["metrics"][key]["value"] for key, _, _ in features]}
                       for p in eligible]
-    return ReferenceFit({"schema_version": 1, "contract_version": 1,
+    metadata = {"schema_version": 1, "contract_version": method_version,
                          "method": "population_standardized_weighted_euclidean", "fictional": True,
-                         "cohort": declared, "features": feature_contract(), "eligibility": settings,
+                         "cohort": declared, "features": feature_contract(method_version), "eligibility": settings,
                          "reference": {"declared_identities": references, "eligible_identities": [selector(p) for p in eligible],
                                        "count": len(eligible), "data_sha256": digest(reference_data),
                                        "sample_contexts": [_context(p) for p in eligible],
                                        "exclusions": exclusions,
                                        "exclusion_reason_counts": dict(sorted(Counter(r for p in exclusions for r in p["reasons"]).items()))},
                          "scaling": statistics, "active_features": active,
-                         "inactive_features": [key for key, _, _ in FEATURES if key not in active],
+                         "inactive_features": [key for key, _, _ in features if key not in active],
                          "constant_policy": {"relative_tolerance": CONSTANT_RELATIVE_TOLERANCE,
                                              "rule": "population_std / reference_max <= tolerance; all-zero is constant",
                                              "weight_policy": "drop globally and renormalize equal remaining family weights once"},
-                         "query_may_belong_to_reference": True})
+                         "query_may_belong_to_reference": True}
+    if method_version == 2:
+        metadata.update(threshold_status="provisional_demonstration_only",
+                        real_player_rankings_allowed=False, real_integration_allowed=False,
+                        match_hold_policy=document.get("match_hold_policy"))
+    return ReferenceFit(metadata)
+
+
+def eligibility_details(profile, cohort, settings, reasons):
+    """Visible missing-input and exposure evidence for version 2; no imputation."""
+    result = {"eligible": not reasons, "reasons": reasons,
+              "thresholds": {**settings, "status": "provisional_demonstration_only"}}
+    if profile is None:
+        return {**result, "sample": None, "features": None}
+    result["sample"] = _context(profile)
+    metrics = mapping(profile.get("metrics"))
+    input_reasons = eligibility(profile, cohort, settings, 2)
+    result["features"] = []
+    for feature in feature_contract(2):
+        key = feature["key"]
+        metric = mapping(metrics.get(key))
+        issues = metric.get("issues")
+        result["features"].append({"key": key, "label": feature["label"],
+            "available": not any(r.endswith(":" + key) for r in input_reasons),
+            "reason": metric.get("reason") if metric else "metric_not_present",
+            "missing_fields": sorted({str(i["field"]) for i in issues
+                                      if isinstance(i, dict) and i.get("reason") == "missing_input" and "field" in i})
+                              if isinstance(issues, list) else [],
+            "coverage": _safe(metric.get("coverage"))})
+    return result
+
+
+def _safe(value):
+    if isinstance(value, dict):
+        return {k: _safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_safe(v) for v in value]
+    if type(value) in (int, float) and not _number(value):
+        return None
+    return value
 
 
 def _context(profile):
-    def safe(value):
-        if isinstance(value, dict):
-            return {k: safe(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [safe(v) for v in value]
-        if type(value) in (int, float) and not _number(value):
-            return None
-        return value
     coverage_keys = ("scope", "full_season_profile", "collected_player_matches", "accepted_player_matches",
                      "excluded_player_matches", "excluded_records", "excluded_match_ids", "exclusion_reason_counts",
                      "provider_listed_total_all_stages", "listed_matches_in_stage", "collected_box_scores_in_stage",
@@ -254,12 +306,14 @@ def _context(profile):
                      "manifest_issues", "unattributed_match_diagnostics_total")
     names = mapping(profile.get("display_names"))
     coverage = profile.get("coverage")
+    if isinstance(coverage, dict):
+        coverage_keys += tuple(k for k in ("held_player_matches", "held_match_ids") if k in coverage)
     return {"identity": selector(profile),
             "display_names": {k: sorted(n for n in names.get(k, []) if isinstance(n, str))
                               if isinstance(names.get(k), list) else [] for k in ("player", "team", "competition")},
             "minutes": profile.get("accepted_minutes") if _number(profile.get("accepted_minutes")) else None,
             "appearances": profile.get("accepted_appearances") if type(profile.get("accepted_appearances")) is int else None,
-            "coverage": safe({k: coverage.get(k) for k in coverage_keys}) if isinstance(coverage, dict) else None}
+            "coverage": _safe({k: coverage.get(k) for k in coverage_keys}) if isinstance(coverage, dict) else None}
 
 
 def _efficiency(profile):
@@ -280,11 +334,13 @@ def _efficiency(profile):
 def explain_pair(fit, query, candidate):
     """Pure arithmetic on one fixed fit; signed deltas mean candidate minus query."""
     metadata = fit.metadata
-    if eligibility(query, metadata["cohort"], metadata["eligibility"]) or eligibility(candidate, metadata["cohort"], metadata["eligibility"]):
+    version = metadata["contract_version"]
+    features = method_features(version)
+    if eligibility(query, metadata["cohort"], metadata["eligibility"], version) or eligibility(candidate, metadata["cohort"], metadata["eligibility"], version):
         raise DataError("pair_requires_eligible_profiles")
     explanations = []
     try:
-        for key, _, _ in FEATURES:
+        for key, _, _ in features:
             q, c = (float(p["metrics"][key]["value"]) for p in (query, candidate))
             scale = metadata["scaling"][key]
             delta = c - q
@@ -304,7 +360,7 @@ def explain_pair(fit, query, candidate):
     except (OverflowError, ZeroDivisionError):
         raise DataError("nonfinite_comparison_arithmetic") from None
     active = [e for e in explanations if e["active"]]
-    order = {key: i for i, (key, _, _) in enumerate(FEATURES)}
+    order = {key: i for i, (key, _, _) in enumerate(features)}
     closest = sorted(active, key=lambda e: (e["squared_distance_contribution"], order[e["key"]]))[:2]
     largest = sorted(active, key=lambda e: (-e["squared_distance_contribution"], order[e["key"]]))[:2]
     return {"candidate": _context(candidate), "distance": distance, "display_distance": round(distance, 4),
@@ -319,11 +375,12 @@ def rank_candidates(fit, document, query_identity, candidates, limit=5):
     if type(limit) is not int or limit <= 0:
         raise DataError("positive_integer_neighbour_limit_required")
     metadata, index = fit.metadata, _index(document)
+    version = metadata["contract_version"]
     query = index.get(identity(query_identity))
     if query is None:
         raise DataError("query_profile_not_found")
     requested = _selectors(candidates)
-    reasons = eligibility(query, metadata["cohort"], metadata["eligibility"])
+    reasons = eligibility(query, metadata["cohort"], metadata["eligibility"], version)
     result = {"schema_version": 1, "kind": "fictional_activity_neighbours", "fictional": True,
               "status": "ineligible_query" if reasons else "ok", "fit": metadata, "query": _context(query),
               "query_exclusion_reasons": reasons, "requested_neighbours": limit, "returned_neighbours": 0,
@@ -331,6 +388,9 @@ def rank_candidates(fit, document, query_identity, candidates, limit=5):
               "candidate_exclusions": [], "exclusion_reason_counts": {}, "neighbours": [],
               "distance_meaning": "Lower distance = closer recorded activity patterns; not player ability.",
               "limitations": LIMITATIONS.copy()}
+    if version == 2:
+        result["query_eligibility"] = eligibility_details(query, metadata["cohort"], metadata["eligibility"], reasons)
+        result["candidate_eligibility"] = []
     if reasons:
         return result
     neighbours, exclusions = [], []
@@ -339,7 +399,10 @@ def rank_candidates(fit, document, query_identity, candidates, limit=5):
         if (selected["provider"], selected["player_id"]) == (query["provider"], query["player_id"]):
             rejected = ["same_player"]
         else:
-            rejected = eligibility(candidate, metadata["cohort"], metadata["eligibility"]) if candidate is not None else ["profile_not_found"]
+            rejected = eligibility(candidate, metadata["cohort"], metadata["eligibility"], version) if candidate is not None else ["profile_not_found"]
+        if version == 2:
+            result["candidate_eligibility"].append({"identity": selected,
+                **eligibility_details(candidate, metadata["cohort"], metadata["eligibility"], rejected)})
         if rejected:
             exclusions.append({"identity": selected, "reasons": rejected})
         else:
@@ -353,9 +416,10 @@ def rank_candidates(fit, document, query_identity, candidates, limit=5):
     return result
 
 
-def compare_file(input_file, cohort_file, query, output, min_minutes=90, min_appearances=2, limit=5):
+def compare_file(input_file, cohort_file, query, output, min_minutes=90, min_appearances=2, limit=5,
+                 *, method_version=METHOD_VERSION):
     document, cohort = read_json(input_file), read_json(cohort_file)
-    fit = fit_reference(document, cohort, min_minutes, min_appearances)
+    fit = fit_reference(document, cohort, min_minutes, min_appearances, method_version=method_version)
     result = rank_candidates(fit, document, query, cohort.get("candidates"), limit)
     atomic_json(output, result)
     return result
@@ -372,6 +436,9 @@ def readable_comparison(result):
              f"Query {q['identity']}; minutes={q['minutes']}, appearances={q['appearances']}.",
              "Query coverage: " + coverage_text(q),
              f"Reference profiles={result['fit']['reference']['count']}; active={result['fit']['active_features']}; inactive={result['fit']['inactive_features']}."]
+    labels = {f["key"]: f.get("label", f["key"]) for f in result["fit"]["features"]}
+    if result["fit"]["contract_version"] == 2:
+        lines.append(f"Method version 2; provisional exposure settings: {result['fit']['eligibility']}.")
     if result["status"] == "ineligible_query":
         lines.append("Query ineligible; no ranking: " + ", ".join(result["query_exclusion_reasons"]))
     for n in result["neighbours"]:
@@ -381,9 +448,16 @@ def readable_comparison(result):
         lines.append("  Coverage: " + coverage_text(p))
         for feature in n["features"]:
             z = feature["standardized_delta"]
-            lines.append(f"  {feature['key']}: q={feature['query_value']:g}, c={feature['candidate_value']:g}, delta={feature['raw_delta']:g}, z_delta={z if z is None else round(z, 4)}, weight={feature['weight']:.4f}, squared contribution={feature['squared_distance_contribution']:.6f}")
+            lines.append(f"  {labels[feature['key']]}: q={feature['query_value']:g}, c={feature['candidate_value']:g}, delta={feature['raw_delta']:g}, z_delta={z if z is None else round(z, 4)}, weight={feature['weight']:.4f}, squared contribution={feature['squared_distance_contribution']:.6f}")
         lines.append("  Closest measured gaps: " + ", ".join(n["closest_measured_gaps"]) + "; largest: " + ", ".join(n["largest_measured_gaps"]))
         if n["inactive_feature_differences"]:
             lines.append("  Ignored constant features differ in raw values: " + ", ".join(n["inactive_feature_differences"]))
     lines.append(f"Returned {result['returned_neighbours']}/{result['requested_neighbours']} requested; candidate exclusions: {result['exclusion_reason_counts']}")
+    for item in result.get("candidate_eligibility", []):
+        if not item["eligible"]:
+            sample = item["sample"] or {}
+            missing = {f["key"]: f["missing_fields"] for f in item["features"] or [] if f["missing_fields"]}
+            lines.append(f"Excluded {item['identity']}: {item['reasons']}; "
+                         f"minutes={sample.get('minutes')}, appearances={sample.get('appearances')}; "
+                         f"missing fields={missing}; thresholds provisional.")
     return "\n".join(lines)
