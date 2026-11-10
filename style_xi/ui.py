@@ -2,12 +2,14 @@
 
 from collections import Counter
 from html import escape
+import re
 from pathlib import Path
 
 import streamlit as st
 
 from .fictional import fictional_example
 from .similarity import FEATURES, fit_reference, identity, rank_candidates, selector
+from .storage import DataError
 
 LABELS = {"passes_per_90": "Passes / 90", "dribbles_per_90": "Dribbles / 90",
           "duels_per_90": "Provider-recorded duels / 90", "shots_per_90": "Shots excluding blocks / 90"}
@@ -72,6 +74,80 @@ def contributor_text(pair):
         delta = features[key]["raw_delta"]
         phrases.append(DRIVERS[key][0 if delta > 0 else 1 if delta < 0 else 2])
     return "; ".join(phrase if i == 0 else phrase[0].lower() + phrase[1:] for i, phrase in enumerate(phrases)) + "."
+
+
+def _markdown_text(value):
+    """Keep names and free-text notes literal in the downloaded Markdown."""
+    return re.sub(r"([\\`*_{}\[\]()#+!|.>-])", r"\\\1", escape(str(value), quote=False))
+
+
+def shortlist_markdown(profile, profiles, saved, notes, result):
+    """Format the current fictional shortlist result; no cache access or refitting."""
+    fit = result["fit"]
+    if (result.get("fictional") is not True or fit.get("fictional") is not True
+            or fit.get("contract_version") != 2
+            or fit.get("real_player_rankings_allowed") is not False
+            or fit.get("real_integration_allowed") is not False):
+        raise DataError("fictional_v2_shortlist_export_required")
+    reference = identity(selector(profile))
+    if identity(result["query"]["identity"]) != reference:
+        raise DataError("shortlist_export_requires_current_reference")
+    pairs = {identity(p["candidate"]["identity"]): p for p in result["neighbours"]}
+    exclusions = {identity(d["identity"]): d for d in result["candidate_eligibility"]}
+    screen = fit["eligibility"]
+    lines = ["# Style-XⅠ fictional scouting shortlist", "",
+             "Fictional demo. All players, clubs and statistics are invented. Real-player analysis remains gated.", "",
+             f"Eligibility: at least {screen['min_minutes']:g} recorded minutes and {screen['min_appearances']} appearances, "
+             "with all four v2 rates complete. Provisional demo screen.", "",
+             f"Method: v2, with a fixed fictional scaling reference of {fit['reference']['count']} samples. "
+             "Lower distance means closer recorded activity patterns, not player ability. "
+             "Per-90 rates use recorded minutes. Match coverage is incomplete.", "", "## Current reference", ""]
+
+    def sample(p):
+        return [f"**{_markdown_text(profile_label(p))}**", "",
+                f"Competition: {_markdown_text(' / '.join(p['display_names']['competition']))} · Season: {p['season']}", "",
+                sample_text(p["accepted_minutes"], p["accepted_appearances"]), ""]
+
+    def rates(p):
+        return ["| Activity | Per 90 recorded minutes |", "|---|---:|",
+                *[f"| {LABELS[key]} | {p['metrics'][key]['value'] if p['metrics'][key]['value'] is not None else shown_metric(p['metrics'][key])} |"
+                  for key, _, _ in FEATURES], ""]
+
+    lines.extend(sample(profile))
+    lines.extend(rates(profile))
+    if result["status"] == "ineligible_query":
+        lines.extend(["Reference sample is ineligible: " + " ".join(dict.fromkeys(
+            exclusion_text(r) for r in result["query_exclusion_reasons"])), ""])
+    lines.extend([f"## Saved candidates ({len(saved)})", ""])
+    if not saved:
+        lines.extend(["No saved candidates.", ""])
+    for key in saved:
+        candidate = profiles[key]
+        lines.extend([f"### {_markdown_text(player_name(candidate))}", "", *sample(candidate), "**Note**", ""])
+        note = notes.get(key, "")
+        lines.extend(["> " + _markdown_text(line) for line in note.splitlines()] if note else ["No note saved."])
+        lines.append("")
+        if key == reference:
+            lines.extend(["Current reference player. No candidate distance is calculated for this sample.", "", *rates(candidate)])
+        elif key in pairs:
+            pair = pairs[key]
+            lines.extend([f"Distance from reference: {pair['distance']}", "",
+                          f"Distance squared: {pair['distance_squared']}", "",
+                          "Main differences: " + contributor_text(pair), "",
+                          "Differences are candidate minus reference. Weighted squared contributions add to distance squared.", "",
+                          "| Activity | Reference / 90 | Candidate / 90 | Difference / 90 | Standardized difference | Weight | Squared contribution |",
+                          "|---|---:|---:|---:|---:|---:|---:|"])
+            for f in pair["features"]:
+                standardized = f["standardized_delta"] if f["active"] else "Inactive in the fixed fit"
+                lines.append(f"| {LABELS[f['key']]} | {f['query_value']} | {f['candidate_value']} | {f['raw_delta']} | "
+                             f"{standardized} | {f['weight']} | {f['squared_distance_contribution']} |")
+            lines.append("")
+        else:
+            reason = ("the reference sample is ineligible." if result["status"] == "ineligible_query" else
+                      " ".join(dict.fromkeys(exclusion_text(r) for r in exclusions[key]["reasons"])))
+            lines.extend(["Distance unavailable: " + reason, "", *rates(candidate)])
+    lines.extend(["Saved order is kept. Equal distances remain ties; order does not break them.", ""])
+    return "\n".join(lines)
 
 
 def neighbour_rows(result):
@@ -247,6 +323,11 @@ def _render_shortlist(document, fit, profile, profiles):
                          help="Only kept for this session. Removing the player or clearing the shortlist removes the note.",
                          on_change=_save_shortlist_note, args=(key, note_key))
             st.button("Remove " + player_name(candidate), key=_key("remove", key), on_click=_remove_from_shortlist, args=(key,))
+    st.download_button("Download fictional shortlist (.md)",
+                       data=shortlist_markdown(profile, profiles, saved, st.session_state.shortlist_notes, result),
+                       file_name="style-xi-fictional-shortlist.md", mime="text/markdown; charset=utf-8",
+                       key="shortlist_download", on_click="ignore", width="stretch",
+                       help="Includes every saved player, applied note edits and comparisons with the current reference.")
     st.button("Clear shortlist", key="clear_shortlist", on_click=_clear_shortlist)
     return pairs
 

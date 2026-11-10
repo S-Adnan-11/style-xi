@@ -27,7 +27,11 @@ profile code; it needs no provider credentials, private cache or generated files
    Write up to 240 characters in **Note for Mira Reed** to remember why you saved
    that player. Click away or press Ctrl+Enter to apply an edit. Notes stay with
    each saved sample when you search or change the reference, including an
-   ineligible reference.
+   ineligible reference. Select **Download fictional shortlist (.md)** to save all
+   shortlisted players with the current reference, applied notes, recorded minutes
+   and appearances, per-90 rates and precise v2 distance contributions. Apply a note
+   edit before downloading. The file is labelled fictional; search and the side-by-side
+   selection do not limit which saved players it includes.
 4. Candidate cards describe their two largest distance features in plain language,
    such as “More recorded duels; higher pass rate.” These compare per-90 rates with
    the reference and use the engine's existing top-two feature selection. Expand
@@ -38,7 +42,9 @@ profile code; it needs no provider credentials, private cache or generated files
 5. Change **Reference player** to **Mira Reed**. All three samples stay saved; Mira is
    identified as the current reference and appears once in the comparison cards.
    Pax's distance and contributors recalculate. The five-profile scaling fit stays
-   fixed. Removing a saved sample also removes it from the comparison selection.
+   fixed. Download again to see Mira as the reference, the saved notes and the
+   updated comparisons. Removing a saved sample also removes it from the comparison
+   selection.
 6. Search for **Rumi** under **Search candidates**. There are zero eligible
    candidates: Rumi's dribble inputs cover only one of two accepted appearances.
    Expand **Why some profiles are excluded** for the missing dribble count and
@@ -56,8 +62,9 @@ profile code; it needs no provider credentials, private cache or generated files
 Saved entries belong to the current Streamlit session and use the full provider,
 competition, season, stage, club and player identity. Search and reference changes
 do not clear them. A new browser session starts empty; there is no account storage,
-disk persistence or export. Distances are recomputed from v2 engine results rather
-than retained from an earlier reference or filtered search.
+disk persistence. The Markdown file is an explicit download of the fictional
+session; it does not load the live cache. Distances are recomputed from v2 engine
+results rather than retained from an earlier reference or filtered search.
 
 This flow uses the existing provisional **90 recorded minutes/two appearances**
 comparison screen with complete v2 feature coverage. The offline stability study's

@@ -65,7 +65,10 @@ eligibility criteria remain visible above search.
 
 Add a short note to each saved player to remember why you picked them. Notes stay
 in the current session when you change the reference. Removing a player or clearing
-the shortlist removes their notes too.
+the shortlist removes their notes too. Use **Download fictional shortlist (.md)**
+to save the current reference, every saved candidate, notes, recorded exposure and
+v2 comparison details. Apply note edits before downloading. The file is labelled
+fictional and updates when you change the reference.
 
 The shortlist lasts for the current Streamlit session. Changing the reference
 player keeps saved samples and recalculates their distances with the same fixed
@@ -85,7 +88,8 @@ The interface uses version 2: passes, dribbles, provider-recorded duels and **Sh
 excluding blocks**, with visible feature contributions. Its 90-minute and two-appearance
 thresholds are provisional demonstration settings.
 The interface uses the same package functions as the CLI. It has no real-data mode,
-provider controls or data exports. Streamlit usage-statistics collection is disabled
+provider controls or live-data exports. The Markdown download contains only the
+fictional session shortlist. Streamlit usage-statistics collection is disabled
 in the local configuration.
 
 ## Offline example
