@@ -10,6 +10,10 @@ can load a credential into memory, construct `Campaign(manifest_path)`, print
 `status()` and call `run(key)`. Public code has no dependency on that wrapper.
 `status()` is read-only and needs neither a key nor a provider call.
 
+Use [frozen evaluation inputs](evaluation-snapshots.md) to retain a verified
+evaluation snapshot before collection advances. Capture preserves the exact
+ledger, shared account and checkpoint under the existing collector locks.
+
 For a bounded inspection step, call `run(key, max_new_attempts=10)`. A positive
 integer bounds actual additional attempts for that invocation, including failures
 and useful quota bootstrap. `invocation_attempt_limit` is a normal checkpoint stop.
