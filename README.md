@@ -53,6 +53,10 @@ From the repository root, start the app:
 Open <http://127.0.0.1:8501>. Stop the app with **Ctrl+C** in that terminal.
 Choose a **Reference player** and review the compact minutes/appearances summary.
 Search candidates by player or club name and use each candidate's **Add** button.
+Use **League** and **Observed position** to narrow the invented catalog. Search and
+filters combine before the five-result limit; the original five-sample v2 scaling
+reference stays fixed. Observed labels come from fictional appearances, not inferred
+tactical roles.
 The shortlist count stays beside search. Candidate cards describe their two biggest
 rate differences in plain language; **Details** contains precise contributions.
 Full reference rates and coverage are under **Reference stats and method**.
@@ -72,8 +76,8 @@ fictional and updates when you change the reference.
 
 The shortlist lasts for the current Streamlit session. Changing the reference
 player keeps saved samples and recalculates their distances with the same fixed
-fit. Search filters leave the shortlist available, including searches with zero
-eligible candidates. An ineligible reference keeps recorded rates visible and
+fit. League, observed-position and search filters leave the shortlist available,
+including results with zero eligible candidates. An ineligible reference keeps recorded rates visible and
 marks candidate distances unavailable. Expand exclusions for actual exposure,
 thresholds and missing-input coverage. Equal distances share a group; display order
 does not break a tie. See [the fictional scouting walkthrough](docs/scouting-workflow.md).

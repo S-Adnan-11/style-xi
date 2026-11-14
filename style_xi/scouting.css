@@ -63,4 +63,6 @@
   .st-key-candidate_toolbar a { padding: .5rem .55rem; font-size: .8rem; }
   .comparison-grid { grid-template-columns: 1fr; }
   .candidate-heading { gap: .5rem; }
+  .st-key-candidate_filters [data-testid="stHorizontalBlock"] { flex-direction: column; gap: .5rem; }
+  .st-key-candidate_filters [data-testid="stColumn"] { width: 100%; flex: 1 1 auto; min-width: 0; }
 }

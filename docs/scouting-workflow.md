@@ -19,6 +19,13 @@ profile code; it needs no provider credentials, private cache or generated files
 2. Search candidates by player or club name. Select **Add Mira Reed**, **Add Neri
    Lark** and **Add Pax Ember** on their result cards. The **Shortlist · 3** link
    beside search jumps to saved entries. Saved samples have disabled Add buttons.
+   **League** and **Observed position** narrow the invented catalog before the
+   five-result limit. Lantern League plus Forward shows Pax and Vela Dawn, even
+   though Vela is outside the unfiltered top five. Meadow League plus Forward shows
+   Ivo Vale. Filters combine with search; **All leagues** and **All observed
+   positions** clear their respective restrictions. Labels are observations from
+   invented appearances; missing labels stay unavailable and mixed labels match
+   either observed label.
 3. **Session shortlist** appears beside results on desktop and below them on narrow
    screens. Under **Shortlist side by side**, **Players to compare** initially
    selects all saved candidates. Cards show the reference alongside their minutes,
@@ -31,7 +38,7 @@ profile code; it needs no provider credentials, private cache or generated files
    shortlisted players with the current reference, applied notes, recorded minutes
    and appearances, per-90 rates and precise v2 distance contributions. Apply a note
    edit before downloading. The file is labelled fictional; search and the side-by-side
-   selection do not limit which saved players it includes.
+   selection and discovery filters do not limit which saved players it includes.
 4. Candidate cards describe their two largest distance features in plain language,
    such as “More recorded duels; higher pass rate.” These compare per-90 rates with
    the reference and use the engine's existing top-two feature selection. Expand
@@ -51,7 +58,8 @@ profile code; it needs no provider credentials, private cache or generated files
    coverage. The saved shortlist stays available. Search **Sable** to inspect a
    30-minute/one-appearance sample against the provisional 90-minute/two-appearance
    screen. Search an unknown name to inspect an empty result set. Clear the search
-   to restore the full pool.
+   to restore the full pool. A league/position combination with no eligible samples
+   also shows an empty result without clearing saved samples or notes.
 7. Choose **Rumi Mist** as the reference player. The comparison warning explains
    the missing inputs. Saved rates remain visible, and candidate distances become
    unavailable. Changing back to an eligible reference recalculates the distances.
