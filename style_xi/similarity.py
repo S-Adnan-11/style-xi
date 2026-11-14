@@ -93,7 +93,7 @@ def _cohort(cohort):
             or not isinstance(cohort.get("name"), str) or not cohort["name"].strip()
             or not isinstance(cohort.get("role_group"), str) or not cohort["role_group"].strip()):
         raise DataError("declared_fictional_cohort_required")
-    if set(cohort) - {"schema_version", "fictional", "name", "scope", "role_group", "role_player_ids", "reference", "candidates"}:
+    if set(cohort) - {"schema_version", "fictional", "name", "scope", "discovery_scopes", "role_group", "role_player_ids", "reference", "candidates"}:
         raise DataError("unsupported_cohort_fields")
     scope = cohort.get("scope")
     if (not isinstance(scope, dict) or set(scope) != set(PROFILE_IDENTITY[:4])
@@ -105,8 +105,19 @@ def _cohort(cohort):
     if (not isinstance(roles, list) or not roles or not all(positive_id(p) for p in roles)
             or len(set(roles)) != len(roles)):
         raise DataError("explicit_unique_fictional_role_members_required")
-    return {"name": cohort["name"], "fictional": True, "scope": scope,
-            "role_group": cohort["role_group"], "role_player_ids": sorted(roles)}
+    declared = {"name": cohort["name"], "fictional": True, "scope": scope,
+                "role_group": cohort["role_group"], "role_player_ids": sorted(roles)}
+    if "discovery_scopes" in cohort:
+        scopes = cohort["discovery_scopes"]
+        if (not isinstance(scopes, list) or not scopes
+                or any(not isinstance(extra, dict) or set(extra) != set(scope)
+                       or not positive_id(extra.get("competition_id"))
+                       or any(extra.get(k) != scope[k] for k in ("provider", "season", "stage")) for extra in scopes)):
+            raise DataError("explicit_fictional_discovery_scopes_required")
+        if len({extra["competition_id"] for extra in [scope, *scopes]}) != len(scopes) + 1:
+            raise DataError("unique_fictional_discovery_scopes_required")
+        declared["discovery_scopes"] = sorted(scopes, key=lambda extra: extra["competition_id"])
+    return declared
 
 
 def _index(document):
@@ -138,7 +149,8 @@ def _selectors(values):
 def eligibility(profile, cohort, settings, method_version=METHOD_VERSION):
     """All original required features remain mandatory, including inactive ones."""
     reasons = []
-    if any(profile[k] != value for k, value in cohort["scope"].items()):
+    if not any(all(profile[k] == value for k, value in scope.items())
+               for scope in [cohort["scope"], *cohort.get("discovery_scopes", [])]):
         reasons.append("outside_cohort_scope")
     if profile["player_id"] not in cohort["role_player_ids"]:
         reasons.append("outside_declared_role_group")
@@ -221,9 +233,10 @@ def fit_reference(document, cohort, min_minutes=90, min_appearances=2, *, method
     if len(set(players)) != len(players):
         raise DataError("ambiguous_reference_player_spells")
     eligible, exclusions = [], []
+    reference_cohort = {k: v for k, v in declared.items() if k != "discovery_scopes"}
     for requested in references:
         profile = index.get(identity(requested))
-        reasons = eligibility(profile, declared, settings, method_version) if profile is not None else ["profile_not_found"]
+        reasons = eligibility(profile, reference_cohort, settings, method_version) if profile is not None else ["profile_not_found"]
         if reasons:
             exclusions.append({"identity": requested, "reasons": reasons})
             if method_version == 2:
