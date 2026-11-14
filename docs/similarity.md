@@ -64,6 +64,14 @@ identity lists. Scope is one provider, competition, season and regular-season st
 The role group is an example fact, not inferred from action counts. The generated cohort
 file is a runnable format example; all identity lists use the six fields below.
 
+The fictional app can explicitly declare additional `discovery_scopes` for invented
+leagues. Each must keep the reference scope's provider, season and regular stage,
+with a distinct competition ID. Queries and candidates may use these declared
+scopes; reference samples still have to belong to the original scope. The app keeps
+the original five reference samples and their v2 scales. Cohorts without this
+optional field retain the single-scope restriction. This fictional catalog does
+not validate real positions or cross-league comparisons.
+
 Every selector must give `provider`, `competition_id`, `season`, `stage`, `team_id`,
 `player_id`. CLI selectors use that exact slash-separated order. Names or player ID
 alone cannot select a profile. Duplicate full identities are errors. Club/stage identity

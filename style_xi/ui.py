@@ -7,7 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from .fictional import fictional_example
+from .fictional import fictional_discovery_example
 from .similarity import FEATURES, fit_reference, identity, rank_candidates, selector
 from .storage import DataError
 
@@ -24,7 +24,7 @@ DRIVERS = {
 
 @st.cache_resource(show_spinner=False)
 def demo_data():
-    profiles, cohort = fictional_example()
+    profiles, cohort = fictional_discovery_example()
     return profiles, cohort, fit_reference(profiles, cohort, min_minutes=90, min_appearances=2, method_version=2)
 
 
@@ -35,6 +35,32 @@ def player_name(profile):
 def profile_label(profile):
     stage = "Regular season" if profile["stage"] == "regular" else "Playoff"
     return f"{player_name(profile)} · {' / '.join(profile['display_names']['team'])} · {stage}"
+
+
+def observed_position_text(profile):
+    labels = list(profile.get("observed_positions", []))
+    if profile.get("observed_position_missing", not labels):
+        labels.append("Unavailable")
+    return " / ".join(labels)
+
+
+def discovery_candidates(profiles, candidates, *, search="", league=None, position=None):
+    """Filter the catalog before the scorer applies its display limit."""
+    search = search.strip().casefold()
+    selected = []
+    for candidate in candidates:
+        profile = profiles[identity(candidate)]
+        if league is not None and profile["competition_id"] != league:
+            continue
+        labels = profile.get("observed_positions", [])
+        if position == "Unavailable":
+            if not profile.get("observed_position_missing", not labels):
+                continue
+        elif position is not None and position not in labels:
+            continue
+        if not search or search in profile_label(profile).casefold():
+            selected.append(candidate)
+    return selected
 
 
 def sample_text(minutes, appearances):
@@ -255,7 +281,7 @@ def _render_results(result, profile, profiles):
     st.caption(f"{result['eligible_candidates']} eligible · {result['returned_neighbours']} shown · "
                f"{len(result['candidate_exclusions'])} excluded")
     if not result["neighbours"]:
-        st.info("No eligible candidates for this search. Try another player or club, or clear the search. Your shortlist is kept.")
+        st.info("No eligible candidates for these filters. Change the league, observed position or search. Your shortlist is kept.")
     else:
         st.caption("Lower distance means closer patterns. Differences compare per-90 rates with the reference.")
         rows = neighbour_rows(result)
@@ -264,7 +290,8 @@ def _render_results(result, profile, profiles):
             candidate = profiles[key]
             with st.container(border=True, key=_key("candidate", key)):
                 st.markdown(f'<div class="candidate-heading"><div><strong>{escape(row["Player"])}</strong>'
-                            f'<span>{escape(row["Club"])} · Regular season</span></div>'
+                            f'<span>{escape(row["Club"])} · {escape(" / ".join(candidate["display_names"]["competition"]))}'
+                            f' · Observed: {escape(observed_position_text(candidate))} · Regular season</span></div>'
                             f'<div class="distance-number">{pair["distance"]:.4f}'
                             f'<small>Distance · Group {escape(row["Distance group"])}</small></div></div>', unsafe_allow_html=True)
                 st.caption(sample_text(row["Minutes"], row["Appearances"]))
@@ -381,8 +408,9 @@ def _render_reference_stats(profile, fit, result):
             st.write("This is an artificial downstream missingness test: one dribble count was removed after raw validation. "
                      "The raw validator still rejects missing core fields; this tests unavailable-value handling.")
         st.write("Method version 2 uses passes, dribbles, provider-recorded duels and shots excluding blocks. "
-                 "One fictional central-midfield group, competition, season and regular-season stage. "
-                 "The five-profile scaling reference stays fixed when you change the reference player. "
+                 "An explicitly declared fictional catalog across two invented leagues in one season and regular stage. "
+                 "Observed labels come from invented appearances, not inferred roles. "
+                 "The original five-profile scaling reference stays fixed when you change the reference player or discovery filters. "
                  "Activity can reflect team context and opportunity; this does not measure player ability.")
         st.json({"selected_identity": selector(profile), "sample_coverage": coverage, "eligibility": result["query_eligibility"],
                  "reference_count": fit.metadata["reference"]["count"], "scaling": fit.metadata["scaling"],
@@ -424,8 +452,20 @@ def render_app():
             search = st.text_input("Search candidates", key="candidate_search", placeholder="Player or club name").strip().casefold()
         with count_column:
             st.markdown(f"[Shortlist · {len(st.session_state.saved_shortlist)}](#session-shortlist)")
-    candidates = [candidate for candidate in cohort["candidates"]
-                  if not search or search in profile_label(profiles[identity(candidate)]).casefold()]
+    with st.container(key="candidate_filters"):
+        league_column, position_column = st.columns(2)
+        leagues = {p["competition_id"]: " / ".join(p["display_names"]["competition"]) for p in profiles.values()}
+        positions = sorted({label for p in profiles.values() for label in p.get("observed_positions", [])})
+        if any(p.get("observed_position_missing", not p.get("observed_positions")) for p in profiles.values()):
+            positions.append("Unavailable")
+        with league_column:
+            league = st.selectbox("League", [None, *sorted(leagues)], format_func=lambda lid: "All leagues" if lid is None else leagues[lid],
+                                  key="candidate_league")
+        with position_column:
+            position = st.selectbox("Observed position", [None, *positions],
+                                    format_func=lambda label: "All observed positions" if label is None else label,
+                                    key="candidate_position")
+    candidates = discovery_candidates(profiles, cohort["candidates"], search=search, league=league, position=position)
     result = rank_candidates(fit, document, selector(profile), candidates, limit=5)
     with reference_details:
         _render_reference_stats(profile, fit, result)
