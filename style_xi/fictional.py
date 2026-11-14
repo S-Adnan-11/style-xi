@@ -98,3 +98,60 @@ def fictional_example(method_version=METHOD_VERSION):
     """Build reviewed fictional profiles in memory: no paths, credentials or I/O."""
     return profiles_from_fictional_import(replay_envelopes(comparison_snapshots(method_version)),
                                           method_version=method_version)
+
+
+def fictional_discovery_example():
+    """Extend the app catalog; keep the original five v2 reference samples."""
+    snapshots = comparison_snapshots(2)
+    positions = {901201: "Midfielder", 901202: "Midfielder", 901203: "Midfielder",
+                 901204: "Defender", 901205: "Forward", 901206: "Defender",
+                 901207: "Midfielder", 901208: "Forward"}
+
+    def extra(pid, name, position, counts):
+        row = player(pid)
+        passes, dribbles, duels, shots = counts
+        row.update(name=name, position=position)
+        row["statistics"].update(passesTotal=passes, passesSuccessful=passes, passesFailed=0,
+            dribblesTotal=dribbles, dribblesSuccessful=dribbles, dribblesFailed=0,
+            duelsTotal=duels, duelsWon=duels, duelsLost=0,
+            shotsTotal=shots, shotsOnTarget=shots, shotsOffTarget=0)
+        return row
+
+    for box in snapshots[1:]:
+        for side in box["body"]:
+            for row in side["players"]:
+                row["position"] = positions.get(row["id"])
+        if box["scope"]["match_id"] in (901001, 901002):
+            box["body"][0]["players"].append(extra(901210, "Vela Dawn", "Forward", (120, 20, 40, 16)))
+    matches = [fixture(match=902001), fixture(match=902002)]
+    for match in matches:
+        match["league"].update(id=900302, name="Fictional Meadow League")
+        match["homeTeam"].update(id=900104, name="Briarhaven")
+        match["awayTeam"]["name"] = "Dewford"
+    snapshots.append({"endpoint": "https://soccer.highlightly.net/matches", "status": 200,
+        "parameters": {"leagueId": 900302, "season": 2025, "limit": 10, "offset": 0},
+        "body": {"data": matches, "pagination": {"totalCount": 2, "limit": 10, "offset": 0}}})
+    for match in matches:
+        snapshots.append({"endpoint": f"https://soccer.highlightly.net/box-score/{match['id']}", "status": 200,
+            "parameters": {}, "scope": {"match_id": match["id"]},
+            "body": [{"team": match["homeTeam"], "players": [
+                extra(902201, "Ivo Vale", "Forward", (200, 24, 50, 16)),
+                extra(902202, "Zuri Elm", "Defender", (180, 12, 44, 10))]},
+                {"team": match["awayTeam"], "players": []}]})
+    imported = replay_envelopes(snapshots)
+    document, cohort = profiles_from_fictional_import(imported, method_version=2)
+    # Source labels are joined on accepted identity/match keys, never action rates.
+    source_positions = {(box["scope"]["match_id"], side["team"]["id"], row["id"]): row.get("position")
+                        for box in snapshots if "/box-score/" in box["endpoint"]
+                        for side in box["body"] for row in side["players"]}
+    for profile in document["profiles"]:
+        labels = [source_positions[(mid, profile["team_id"], profile["player_id"])]
+                  for mid in profile["contributing_match_ids"]]
+        profile["observed_positions"] = sorted({label.strip() for label in labels if isinstance(label, str) and label.strip()})
+        profile["observed_position_missing"] = not labels or any(not isinstance(label, str) or not label.strip() for label in labels)
+    cohort["name"] = "Fictional discovery catalog"
+    cohort["role_group"] = "Explicit fictional discovery examples; observed labels are not tactical roles"
+    document["fictional_example"]["role_group"] = cohort["role_group"]
+    cohort["role_player_ids"].extend([901210, 902201, 902202])
+    cohort["discovery_scopes"] = [{**cohort["scope"], "competition_id": 900302}]
+    return document, cohort
