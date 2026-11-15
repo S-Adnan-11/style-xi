@@ -118,7 +118,7 @@ class DiscoveryTests(unittest.TestCase):
             saved = list(app.session_state["saved_shortlist"])
             exported = download.call_args.kwargs["data"]
             fit_before = digest(self.fit.metadata)
-            with patch("style_xi.ui.fit_reference", side_effect=AssertionError("filter must not refit")):
+            with patch("style_xi.scouting_data.fit_reference", side_effect=AssertionError("filter must not refit")):
                 app.selectbox(key="candidate_league").set_value(900302).run()
                 app.selectbox(key="candidate_position").set_value("Forward").run()
                 self.assertEqual([b.label for b in app.button if b.key.startswith("add_")], ["Add Ivo Vale"])
