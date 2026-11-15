@@ -8,7 +8,7 @@ import time
 
 from .acquire import Downloader, daily_usage, fresh_remaining
 from .coverage import inspect_pages
-from .normalize import normalize_match, stage_for
+from .normalize import aggregate, normalize_match, stage_for
 from .pipeline import load_snapshots, replay
 from .profiles import build_profiles
 from .storage import DataError, atomic_json, digest, exclusive, now, read_json
@@ -16,6 +16,48 @@ from .storage import DataError, atomic_json, digest, exclusive, now, read_json
 COMPLETED = ("Finished", "Finished after extra time", "Finished after penalties")
 FIELDS = ("passesTotal", "dribblesTotal", "tacklesTotal", "shotsTotal")
 EXCLUDED_STAGES = ("Final", "Semi-finals", "Relegation round - Quarter-finals")
+VALIDATION_FAILURE = "required_field_or_identity_validation_failure"
+
+
+def quarantine_failures(imported, fixtures, snapshots):
+    """Identify exact cached contract failures, without granting collection clearance."""
+    rejected = [r for r in imported["excluded_records"] if r["status"] == "quarantined"]
+    quarantined = {r["match_id"] for r in rejected + imported["match_diagnostics"]}
+    failures = []
+    for mid in sorted(quarantined):
+        boxes = [s for s in snapshots if s["endpoint"].endswith("/box-score/" + str(mid))]
+        # Importer diagnostics include conflicting snapshots and scope integrity failures.
+        # Those cannot receive a collection-only disposition.
+        if (mid not in fixtures or any(r["match_id"] == mid for r in imported["match_diagnostics"])
+                or len({digest(s["body"]) for s in boxes}) != 1):
+            continue
+        fixture = fixtures[mid]
+        records = [{k: r.get(k) for k in ("provider", "competition_id", "season", "stage",
+                    "match_id", "team_id", "player_id", "reasons")}
+                   | {"pointers": sorted(p.get("pointer", "") for p in r.get("provenance", []))}
+                   for r in rejected if r["match_id"] == mid]
+        failures.append({"provider": "highlightly", "competition_id": fixture["league"]["id"],
+                         "season": fixture["league"]["season"], "stage": stage_for(fixture),
+                         "match_id": mid, "fixture_sha256": digest(fixture),
+                         "stored_body_sha256": digest(boxes[0]["body"]),
+                         "failure_code": VALIDATION_FAILURE, "failure_sha256": digest(records)})
+    return quarantined, failures
+
+
+def exclude_quarantined_fixtures(imported, quarantined):
+    """Keep valid-looking teammates as excluded evidence, never partial match samples."""
+    retained, excluded = [], list(imported["excluded_records"])
+    for row in imported["player_matches"]:
+        if row["match_id"] in quarantined:
+            excluded.append({**row, "status": "quarantined", "reasons": ["fixture_quarantined"]})
+        else:
+            retained.append(row)
+    reasons = Counter(reason for row in excluded + imported["match_diagnostics"] for reason in row["reasons"])
+    return {**imported, "player_matches": retained, "excluded_records": excluded,
+            "sample_aggregates": aggregate(retained),
+            "summary": {"accepted": len(retained), "excluded": len(excluded),
+                        "match_diagnostics": len(imported["match_diagnostics"]),
+                        "reason_counts": dict(sorted(reasons.items()))}}
 
 
 def classification(fixture):
@@ -104,7 +146,7 @@ def next_call(groups, fixtures, usable, attempted, last_league=None):
 
 
 class Campaign:
-    def __init__(self, manifest_path, *, transport=None, sleeper=time.sleep):
+    def __init__(self, manifest_path, *, collection_disposition=None, transport=None, sleeper=time.sleep):
         self.path = Path(manifest_path)
         self.manifest = m = read_json(self.path)
         if (m.get("version") != 1 or type(m.get("season")) is not int
@@ -121,6 +163,25 @@ class Campaign:
         kwargs = {"transport": transport} if transport else {}
         self.client = Downloader(self.root, self.account, 1800, m["history"], campaign=policy, **kwargs)
         self.sleeper = sleeper
+        self.collection_disposition = Path(collection_disposition) if collection_disposition is not None else None
+
+    def disposition(self, failures):
+        """An explicitly supplied private decision applies to one exact cached failure."""
+        if self.collection_disposition is None:
+            return None, None
+        try:
+            decision = read_json(self.collection_disposition)
+        except DataError:
+            return None, "collection_disposition_unreadable"
+        if (not isinstance(decision, dict) or type(decision.get("version")) is not int
+                or decision["version"] != 1 or decision.get("manifest_sha256") != self.identity
+                or decision.get("disposition") != "continue_collection_keep_quarantined"
+                or decision.get("analytical_use_allowed") is not False
+                or not isinstance(decision.get("reason"), str) or not decision["reason"].strip()
+                or not isinstance(decision.get("failure"), dict)
+                or digest(decision["failure"]) not in {digest(f) for f in failures}):
+            return None, "collection_disposition_mismatch"
+        return decision["failure"]["match_id"], None
 
     def initialize(self):
         """Called once by a reviewed local setup; never silently replace existing scope."""
@@ -183,10 +244,10 @@ class Campaign:
                 raise DataError("cache_without_campaign_history")
         groups, fixtures = inventory(snapshots, self.manifest["competitions"], self.manifest["season"])
         imported = replay(snapshots)
+        quarantined, failures_for_review = quarantine_failures(imported, fixtures, snapshots)
+        disposed, disposition_error = self.disposition(failures_for_review)
+        imported = exclude_quarantined_fixtures(imported, quarantined)
         usable = {r["match_id"] for r in imported["player_matches"]}
-        quarantined = {r["match_id"] for r in imported["excluded_records"] if r["status"] == "quarantined"}
-        quarantined.update(r["match_id"] for r in imported["match_diagnostics"])
-        usable -= quarantined
         box_attempts = [a for a in ledger["attempts"] if "/box-score/" in a["endpoint"]]
         attempted = {int(a["endpoint"].rsplit("/", 1)[1]) for a in box_attempts}
         failures = {int(a["endpoint"].rsplit("/", 1)[1]) for a in box_attempts
@@ -218,6 +279,15 @@ class Campaign:
             remaining = fresh_remaining(account.get("observation", {}), attempts)
         except DataError:
             remaining = None
+        checkpoint_halt = checkpoint.get("halted")
+        undisposed = quarantined - {disposed}
+        if checkpoint_halt == VALIDATION_FAILURE and disposed is not None and not undisposed:
+            checkpoint_halt = None
+        blocker = (ledger.get("halted") or account.get("halted") or checkpoint_halt
+                   or disposition_error or (VALIDATION_FAILURE if undisposed else None))
+        # A bad decision must block even when the original validation halt is present.
+        if disposition_error and blocker in (None, VALIDATION_FAILURE):
+            blocker = disposition_error
         status = {"updated_utc": now(), "network_requests": 0, "campaign_attempts": len(ledger["attempts"]),
                   "campaign_cap": 1800, "daily_usage": daily_usage(account, attempts), "daily_cap": 90,
                   "reserve": 10, "quota_last_observed": account.get("observation", {}),
@@ -225,6 +295,8 @@ class Campaign:
                   "current_evidenced_allowance": max(0, min(1800 - len(ledger["attempts"]),
                         90 - daily_usage(account, attempts), remaining - 10)) if remaining is not None else None,
                   "halted": checkpoint.get("halted") or ledger.get("halted") or account.get("halted"),
+                  "collection_blocker": blocker, "quarantined_fixtures": sorted(quarantined),
+                  "quarantine_failures": failures_for_review, "collection_disposed_fixture": disposed,
                   "uncertain_attempts": sum(a["outcome"] == "reserved" for a in ledger["attempts"]),
                   "failures": sum(a["outcome"] == "failed" for a in ledger["attempts"]),
                   "leagues": groups, "summary_all_cached_stages": imported["summary"],
@@ -235,6 +307,28 @@ class Campaign:
     def status(self):
         """Read-only, no credentials, no transport and no checkpoint mutations."""
         return self.inspect()[0]
+
+    def _next_request(self, status, fixtures, usable, attempted):
+        if status["collection_blocker"]:
+            raise DataError(str(status["collection_blocker"]))
+        if status["uncertain_attempts"]:
+            raise DataError("uncertain_interrupted_request_requires_review")
+        ledger = self.client.ledger()
+        last = ledger["attempts"][-1]["scope"]["competition_id"] if ledger["attempts"] else None
+        call = next_call(status["leagues"], fixtures, usable, attempted | set(status["quarantined_fixtures"]), last)
+        if call is not None:
+            path, params, scope = call
+            if path.startswith("/box-score/") and not status["field_validation_gate"]["allow_box_scores"]:
+                raise DataError("field_validation_pause_before_box_collection")
+            scope["season"] = self.manifest["season"]
+            if path == "/matches":
+                params["season"] = self.manifest["season"]
+        return call
+
+    def next_request(self):
+        """Read-only selection. This grants no quota or permission to dispatch."""
+        status, _, fixtures, usable, attempted, _ = self.inspect()
+        return self._next_request(status, fixtures, usable, attempted)
 
     def run(self, key, *, max_new_attempts=None):
         """Run one batch, optionally stopping early for an offline review checkpoint."""
@@ -260,23 +354,11 @@ class Campaign:
                 bootstrap_available = True
                 while True:
                     status, imported, fixtures, usable, attempted, snapshots = self.inspect()
-                    if status["halted"]:
-                        raise DataError("persistent_campaign_halt:" + str(status["halted"]))
-                    if status["uncertain_attempts"]:
-                        raise DataError("uncertain_interrupted_request_requires_review")
-                    if any(g["ambiguous_boxes"] for g in status["leagues"]):
-                        raise DataError("required_field_or_identity_validation_failure")
                     ledger = self.client.ledger()
-                    last = ledger["attempts"][-1]["scope"]["competition_id"] if ledger["attempts"] else None
-                    call = next_call(status["leagues"], fixtures, usable, attempted, last)
+                    call = self._next_request(status, fixtures, usable, attempted)
                     if call is None:
                         break
                     path, params, scope = call
-                    if path.startswith("/box-score/") and not status["field_validation_gate"]["allow_box_scores"]:
-                        raise DataError("field_validation_pause_before_box_collection")
-                    scope["season"] = self.manifest["season"]
-                    if path == "/matches":
-                        params["season"] = self.manifest["season"]
                     if datetime.now(timezone.utc).date().isoformat() != self.client.run_day:
                         raise DataError("utc_day_boundary")
                     if len(ledger["attempts"]) >= 1800:
@@ -291,9 +373,9 @@ class Campaign:
                     if path.startswith("/box-score/"):
                         good, bad = normalize_match(fixtures[scope["match_id"]], response["body"], [])
                         if not good or any(r["status"] == "quarantined" for r in bad):
-                            raise DataError("required_field_or_identity_validation_failure")
-                    atomic_json(self.root / "checkpoint.json", {"manifest_sha256": self.identity,
-                                "halted": None, "last_request_id": response["request_id"], "updated_utc": now()})
+                            raise DataError(VALIDATION_FAILURE)
+                    atomic_json(self.root / "checkpoint.json", {**read_json(self.root / "checkpoint.json"),
+                                "last_request_id": response["request_id"], "updated_utc": now()})
             except KeyboardInterrupt:
                 stop = "user_interruption"
             except DataError as error:
@@ -303,9 +385,14 @@ class Campaign:
                                      "field_validation_pause_before_box_collection", "invocation_attempt_limit")
             except Exception:
                 stop, fatal = "unexpected_storage_or_schema_failure_requires_review", True
-            if fatal:
-                atomic_json(self.root / "checkpoint.json", {"manifest_sha256": self.identity,
-                            "halted": stop, "updated_utc": now()})
+            if fatal and not stop.startswith("collection_disposition_"):
+                checkpoint = read_json(self.root / "checkpoint.json")
+                if checkpoint.get("halted") != stop:
+                    prior = checkpoint.get("prior_halts", [])
+                    if checkpoint.get("halted"):
+                        prior = [*prior, checkpoint["halted"]]
+                    atomic_json(self.root / "checkpoint.json", {**checkpoint, "halted": stop,
+                                "prior_halts": prior, "updated_utc": now()})
             # Replay cached data even on a stop. Never hide a failed final verification.
             try:
                 status, imported, fixtures, usable, attempted, snapshots = self.inspect()

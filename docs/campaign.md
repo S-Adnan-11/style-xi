@@ -124,3 +124,53 @@ Each batch writes `batches/<UTC timestamp>.json`, `status.json`, `inventory.json
 stop, not a successful batch. Existing parsing, exclusions, metric denominators
 and fictional comparison rules are unchanged. Even when every target is cached,
 real comparison readiness remains a separate review.
+
+## Resume past one quarantined fixture
+
+A required-field or identity failure stops collection by default. After reviewing
+one cached failure, a separate collection disposition can permit other fixtures
+to be selected. It keeps the failed fixture quarantined, including any otherwise
+valid player rows from that fixture. Campaign imports, aggregates and profiles
+exclude the entire fixture. The original response, raw text, attempt history and
+analytical holds stay intact.
+
+First inspect `Campaign(manifest_path).status()` offline. `quarantine_failures`
+contains the exact failure descriptors available for review. Save a reviewed JSON
+decision outside Git worktrees with these fields:
+
+| Field | Required value |
+|---|---|
+| `version` | `1` |
+| `manifest_sha256` | The unchanged campaign manifest digest |
+| `disposition` | `continue_collection_keep_quarantined` |
+| `analytical_use_allowed` | `false` |
+| `failure` | One exact descriptor from `quarantine_failures` |
+| `reason` | Nonempty explanation of the collection-only decision |
+
+The failure descriptor binds provider, competition, season, stage, match ID, the
+full fixture digest, cached `stored_body_sha256`, failure code and rejected-record
+fingerprint. Copying only a match ID or the generic stop reason is insufficient.
+Integrity diagnostics such as conflicting snapshots or scope mismatches cannot
+receive this disposition. No decision is generated or loaded implicitly.
+
+Supply the reviewed decision explicitly on each invocation:
+
+```python
+campaign = Campaign(manifest_path, collection_disposition=decision_path)
+status = campaign.status()       # Read-only; original halt remains visible.
+call = campaign.next_request()   # Read-only selection; no credential or transport.
+```
+
+`collection_disposed_fixture` identifies the matched decision;
+`collection_blocker` reports the effective collection stop. `halted` retains the
+recorded halt for review. The decision exempts only the exact checkpoint validation
+halt. A missing, unreadable or mismatched decision, another quarantined fixture,
+any other checkpoint halt, and every ledger/account halt still block collection.
+The field gate, quota, daily/campaign limits and uncertain-attempt rules still
+apply. `next_request()` grants no transport allowance; only a separately reviewed
+manual `run(key)` can dispatch through the downloader's existing checks.
+
+Verify selection against a frozen copy with transport disabled before live use.
+Do not clear the checkpoint, remove an invalid row, refetch the fixture or release
+an analytical hold to make selection advance. Real comparison readiness remains
+blocked.
