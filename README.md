@@ -222,6 +222,12 @@ responses are cached atomically, with retrieval times, body hashes and nonsecret
 request identities. A completed cache hit uses no credential and spends no quota.
 Conflicting cached snapshots are retained and require review.
 
+The manual campaign supports an explicit [fixture-specific collection disposition](docs/campaign.md#resume-past-one-quarantined-fixture)
+after a cached validation failure. It permits other fixtures to be selected while
+the failed fixture stays quarantined and excluded from campaign analysis. Offline
+selection needs no credential; live requests retain every existing quota and
+integrity check.
+
 The runner checkpoints coverage after each response. It records page offsets,
 limits, listed match IDs and acquisition state; it detects repeated/empty pages,
 duplicate IDs, changed snapshots, inconsistent totals and incomplete pages.
