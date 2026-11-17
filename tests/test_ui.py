@@ -57,7 +57,7 @@ class InterfaceTests(unittest.TestCase):
         self.assertIn("90+ recorded minutes · 2+ appearances", app.caption[0].value)
         self.assertIn("all four v2 rates complete", app.caption[0].value)
         self.assertTrue(any("Real-player analysis gated" in m.value for m in app.markdown))
-        self.assertEqual(len(app.selectbox), 3)
+        self.assertEqual(len(app.selectbox), 4)
         self.assertEqual(len(app.selectbox(key="query").options), 14)
         reference = details(app, "Reference stats and method")
         self.assertFalse(reference.proto.expanded)

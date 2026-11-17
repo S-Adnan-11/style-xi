@@ -155,3 +155,61 @@ def fictional_discovery_example():
     cohort["role_player_ids"].extend([901210, 902201, 902202])
     cohort["discovery_scopes"] = [{**cohort["scope"], "competition_id": 900302}]
     return document, cohort
+
+
+def harbour_discovery_example():
+    """An independent bundled catalog with its own four-sample reference."""
+    patterns = [
+        (812401, "Eska Tide", "Wing-back", (18, 2, 6, 1)),
+        (812407, "Hale Kite", "Wing-back", (20, 3, 8, 2)),
+        (812419, "Jora Bay", "Centre-back", (30, 1, 16, 0)),
+        (812431, "Kestrel Fenn", "Winger", (12, 8, 4, 5)),
+        (812443, "Lio Cove", "Wing-back", (19, 2, 7, 1)),
+        (812457, "Noma Drift", "Centre-back", (22, 2, 10, 1)),
+        (812463, "Ossa Gale", "Winger", (16, 4, 6, 3)),
+        (812479, "Perrin Foam", "Striker", (4, 12, 30, 18)),
+    ]
+    snapshots = []
+    for league, club, opponent, match_ids, rows in (
+        ((810301, "Fictional Harbour League"), (810111, "Glassport"), (810112, "Saltwick"),
+         (811031, 811047), patterns),
+        ((810317, "Fictional Summit League"), (810127, "Copperbay"), (810128, "Cloudmere"),
+         (811063, 811079), [(813503, "Rhea Crest", "Striker", (6, 10, 24, 14)),
+                           (813521, "Soren Peak", "Centre-back", (28, 1, 18, 0))]),
+    ):
+        matches = [{"id": mid, "round": f"Regular Season - {i + 1}",
+                    "league": {"id": league[0], "name": league[1], "season": 2031},
+                    "homeTeam": {"id": club[0], "name": club[1]},
+                    "awayTeam": {"id": opponent[0], "name": opponent[1]},
+                    "state": {"description": "Finished"}} for i, mid in enumerate(match_ids)]
+        snapshots.append({"endpoint": "https://soccer.highlightly.net/matches", "status": 200,
+                          "parameters": {"leagueId": league[0], "season": 2031, "limit": 10, "offset": 0},
+                          "body": {"data": matches, "pagination": {"totalCount": 2, "limit": 10, "offset": 0}}})
+        for match in matches:
+            appearances = []
+            for pid, name, position, rates in rows:
+                passes, dribbles, duels, shots = rates
+                row = player(pid, minutes=60)
+                row.update(name=name, position=position)
+                row["statistics"].update(passesTotal=passes, passesSuccessful=passes, passesFailed=0,
+                    dribblesTotal=dribbles, dribblesSuccessful=dribbles, dribblesFailed=0,
+                    duelsTotal=duels, duelsWon=duels // 2, duelsLost=duels - duels // 2,
+                    shotsTotal=shots, shotsOnTarget=shots, shotsOffTarget=0)
+                appearances.append(row)
+            snapshots.append({"endpoint": f"https://soccer.highlightly.net/box-score/{match['id']}", "status": 200,
+                              "parameters": {}, "scope": {"match_id": match["id"]},
+                              "body": [{"team": match["homeTeam"], "players": appearances},
+                                       {"team": match["awayTeam"], "players": []}]})
+    document = build_profiles(replay_envelopes(snapshots))
+    positions = {pid: position for pid, _, position, _ in patterns} | {813503: "Striker", 813521: "Centre-back"}
+    for profile in document["profiles"]:
+        profile.update(observed_positions=[positions[profile["player_id"]]], observed_position_missing=False)
+    scope = {"provider": "highlightly", "competition_id": 810301, "season": 2031, "stage": "regular"}
+    cohort = {"schema_version": 1, "fictional": True, "name": "Fictional harbour catalog", "scope": scope,
+              "role_group": "Explicit fictional harbour examples; observed labels are not tactical roles",
+              "role_player_ids": [p["player_id"] for p in document["profiles"]],
+              "reference": [selector(p) for p in document["profiles"] if p["player_id"] in (812401, 812407, 812419, 812431)],
+              "candidates": [selector(p) for p in document["profiles"]],
+              "discovery_scopes": [{**scope, "competition_id": 810317}]}
+    document["fictional_example"] = {"role_group": cohort["role_group"]}
+    return document, cohort
