@@ -11,6 +11,19 @@ Open <http://127.0.0.1:8501>. Stop the app with Ctrl+C. On Linux, use
 invented match counts and profiles in memory through the existing importer and
 profile code; it needs no provider credentials, private cache or generated files.
 
+The **Fictional dataset** picker starts with **Lantern demo**. Both examples use
+the same validated loader and existing importer/profile/v2 comparison functions.
+**Harbour demo** has its own IDs, clubs, leagues, observed positions and rates, a
+four-sample scaling reference and **Eska Tide · Glassport · Regular season** as
+its default reference (120 recorded minutes, two appearances). Select Harbour
+League and Striker to find Perrin Foam beyond the unfiltered top five; Summit
+League and Striker shows Rhea Crest. Its notes, comparisons and Markdown downloads
+work the same way as Lantern's. Changing datasets clears saved samples, notes,
+comparison selections and discovery filters. Malformed bundles show a clear error
+before scouting starts. Runtime selection is limited to the two bundled examples.
+
+For the default Lantern example:
+
 1. Keep **Lumen Ash · Mossbridge · Regular season** as the reference player. The
    compact summary shows 180 recorded minutes and two accepted appearances. Expand
    **Reference stats and method** for full rates, coverage and the fixed scaling
@@ -69,10 +82,11 @@ profile code; it needs no provider credentials, private cache or generated files
 
 Saved entries belong to the current Streamlit session and use the full provider,
 competition, season, stage, club and player identity. Search and reference changes
-do not clear them. A new browser session starts empty; there is no account storage,
-disk persistence. The Markdown file is an explicit download of the fictional
-session; it does not load the live cache. Distances are recomputed from v2 engine
-results rather than retained from an earlier reference or filtered search.
+do not clear them within a dataset. Changing datasets or starting a new browser
+session starts empty; there is no account storage or disk persistence. The Markdown
+file is an explicit download of the fictional session; it does not load the live
+cache. Distances are recomputed from v2 engine results rather than retained from
+an earlier reference or filtered search.
 
 This flow uses the existing provisional **90 recorded minutes/two appearances**
 comparison screen with complete v2 feature coverage. The offline stability study's
@@ -82,8 +96,8 @@ scope exclusions, same-player exclusions and exact-distance ties retain the
 fictional declaration and disabled real-player ranking/integration flags remain
 in force; this workflow establishes no real scouting conclusion.
 
-Run the focused interface tests with:
+Run the focused loader and dataset workflow tests with:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_ui.py -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_scouting_data*.py' -v
 ```

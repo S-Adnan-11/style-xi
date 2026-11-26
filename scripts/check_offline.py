@@ -81,6 +81,7 @@ for attempt in (
 
         # Exercise AppTest and real server startup before any example writes files.
         run("-m", "unittest", "discover", "-s", "tests", "-p", "test_ui.py", "-v")
+        run("-m", "unittest", "discover", "-s", "tests", "-p", "test_scouting_data_ui.py", "-v")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]

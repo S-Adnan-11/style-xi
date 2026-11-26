@@ -7,8 +7,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from .fictional import fictional_discovery_example
-from .similarity import FEATURES, fit_reference, identity, rank_candidates, selector
+from .scouting_data import BUNDLED_DATASETS, DEFAULT_DATASET, load_bundled_dataset
+from .similarity import FEATURES, identity, rank_candidates, selector
 from .storage import DataError
 
 LABELS = {"passes_per_90": "Passes / 90", "dribbles_per_90": "Dribbles / 90",
@@ -23,9 +23,8 @@ DRIVERS = {
 
 
 @st.cache_resource(show_spinner=False)
-def demo_data():
-    profiles, cohort = fictional_discovery_example()
-    return profiles, cohort, fit_reference(profiles, cohort, min_minutes=90, min_appearances=2, method_version=2)
+def demo_data(dataset_id=DEFAULT_DATASET):
+    return load_bundled_dataset(dataset_id)
 
 
 def player_name(profile):
@@ -217,6 +216,13 @@ def _clear_shortlist():
     st.session_state.shortlist_notes = {}
 
 
+def _change_dataset():
+    _clear_shortlist()
+    for dataset_id in BUNDLED_DATASETS:
+        for key in ("query", "candidate_search", "candidate_league", "candidate_position"):
+            st.session_state.pop(f"{dataset_id}_{key}", None)
+
+
 def _save_shortlist_note(key, widget_key):
     if key in st.session_state["saved_shortlist"]:
         st.session_state["shortlist_notes"][key] = st.session_state[widget_key]
@@ -404,13 +410,13 @@ def _render_reference_stats(profile, fit, result):
                    f"{coverage['excluded_records']} excluded records · Incomplete match coverage")
         st.dataframe([{"Activity": LABELS[key], "Per 90 minutes": shown_metric(profile["metrics"][key])}
                       for key, _, _ in FEATURES], hide_index=True, width="stretch", key="sample_rates")
-        if profile["player_id"] == 901207:
-            st.write("This is an artificial downstream missingness test: one dribble count was removed after raw validation. "
-                     "The raw validator still rejects missing core fields; this tests unavailable-value handling.")
+        if profile.get("fictional_missingness_note"):
+            st.write(profile["fictional_missingness_note"])
         st.write("Method version 2 uses passes, dribbles, provider-recorded duels and shots excluding blocks. "
                  "An explicitly declared fictional catalog across two invented leagues in one season and regular stage. "
                  "Observed labels come from invented appearances, not inferred roles. "
-                 "The original five-profile scaling reference stays fixed when you change the reference player or discovery filters. "
+                 f"The selected dataset's {fit.metadata['reference']['count']}-profile scaling reference stays fixed "
+                 "when you change the reference player or discovery filters. "
                  "Activity can reflect team context and opportunity; this does not measure player ability.")
         st.json({"selected_identity": selector(profile), "sample_coverage": coverage, "eligibility": result["query_eligibility"],
                  "reference_count": fit.metadata["reference"]["count"], "scaling": fit.metadata["scaling"],
@@ -427,19 +433,28 @@ def render_app():
     st.markdown('<div class="demo-banner"><span class="demo-badge">Fictional demo</span>'
                 '<span class="demo-note">Real-player analysis gated</span></div>', unsafe_allow_html=True)
     st.caption("Eligibility: 90+ recorded minutes · 2+ appearances · all four v2 rates complete. Provisional demo screen.")
-    document, cohort, fit = demo_data()
-    profiles = {identity(selector(p)): p for p in document["profiles"]}
     st.session_state.setdefault("saved_shortlist", [])
     st.session_state.setdefault("comparison_selection", [])
     st.session_state.setdefault("comparison_revision", 0)
     st.session_state.setdefault("shortlist_notes", {})
+    dataset_id = st.selectbox("Fictional dataset", list(BUNDLED_DATASETS),
+                              index=list(BUNDLED_DATASETS).index(DEFAULT_DATASET),
+                              format_func=BUNDLED_DATASETS.__getitem__, key="dataset", on_change=_change_dataset,
+                              help="Bundled fictional examples only. Changing datasets clears the shortlist, notes and filters.")
+    try:
+        document, cohort, fit = demo_data(dataset_id)
+    except DataError as error:
+        st.error(str(error))
+        st.stop()
+    profiles = {identity(selector(p)): p for p in document["profiles"]}
     choices = sorted(profiles, key=lambda key: profile_label(profiles[key]))
-    default = next(key for key in choices if key[-1] == 901201 and key[-2] == 900101 and key[3] == "regular")
+    default = identity(document["fictional_example"]["default_reference"])
+    # Distinct widget identities reset browser labels as well as server values.
     with st.container(key="reference_strip"):
         picker, summary = st.columns([3, 2], vertical_alignment="bottom")
         with picker:
             selected = st.selectbox("Reference player", choices, index=choices.index(default),
-                                    format_func=lambda key: profile_label(profiles[key]), key="query")
+                                    format_func=lambda key: profile_label(profiles[key]), key=f"{dataset_id}_query")
         profile = profiles[selected]
         with summary:
             label = "appearance" if profile["accepted_appearances"] == 1 else "appearances"
@@ -449,7 +464,7 @@ def render_app():
     with st.container(key="candidate_toolbar"):
         search_column, count_column = st.columns([4, 1], vertical_alignment="bottom")
         with search_column:
-            search = st.text_input("Search candidates", key="candidate_search", placeholder="Player or club name").strip().casefold()
+            search = st.text_input("Search candidates", key=f"{dataset_id}_candidate_search", placeholder="Player or club name").strip().casefold()
         with count_column:
             st.markdown(f"[Shortlist · {len(st.session_state.saved_shortlist)}](#session-shortlist)")
     with st.container(key="candidate_filters"):
@@ -460,11 +475,11 @@ def render_app():
             positions.append("Unavailable")
         with league_column:
             league = st.selectbox("League", [None, *sorted(leagues)], format_func=lambda lid: "All leagues" if lid is None else leagues[lid],
-                                  key="candidate_league")
+                                  key=f"{dataset_id}_candidate_league")
         with position_column:
             position = st.selectbox("Observed position", [None, *positions],
                                     format_func=lambda label: "All observed positions" if label is None else label,
-                                    key="candidate_position")
+                                    key=f"{dataset_id}_candidate_position")
     candidates = discovery_candidates(profiles, cohort["candidates"], search=search, league=league, position=position)
     result = rank_candidates(fit, document, selector(profile), candidates, limit=5)
     with reference_details:

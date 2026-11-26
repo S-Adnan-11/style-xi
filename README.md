@@ -51,10 +51,16 @@ From the repository root, start the app:
 ```
 
 Open <http://127.0.0.1:8501>. Stop the app with **Ctrl+C** in that terminal.
+**Fictional dataset** starts with **Lantern demo**, the current example. Choose
+**Harbour demo** for a second invented catalog with different players, clubs,
+leagues, observed positions and rates. Each dataset loads through the same validated
+path and declares its own fixed scaling reference: five samples for Lantern,
+four for Harbour. Changing datasets clears the shortlist, notes, reference and
+search filters. Only these bundled fictional examples can be selected.
 Choose a **Reference player** and review the compact minutes/appearances summary.
 Search candidates by player or club name and use each candidate's **Add** button.
 Use **League** and **Observed position** to narrow the invented catalog. Search and
-filters combine before the five-result limit; the original five-sample v2 scaling
+filters combine before the five-result limit; the selected dataset's v2 scaling
 reference stays fixed. Observed labels come from fictional appearances, not inferred
 tactical roles.
 The shortlist count stays beside search. Candidate cards describe their two biggest
@@ -82,11 +88,12 @@ marks candidate distances unavailable. Expand exclusions for actual exposure,
 thresholds and missing-input coverage. Equal distances share a group; display order
 does not break a tie. See [the fictional scouting walkthrough](docs/scouting-workflow.md).
 
-The app builds the reviewed fictional examples in memory. It needs no credential,
+The app validates and builds both bundled fictional examples in memory. Malformed
+bundles show a clear error and stop the workflow. It needs no credential,
 private cache, generated output or network connection. Players, clubs and statistics
-are invented. The reference and the example's minimum of 90 minutes and two
-appearances stay fixed when selections change. Ineligible examples remain selectable
-so their unavailable inputs and exclusion reasons can be inspected.
+are invented. Each dataset's scaling reference and the minimum of 90 minutes and two
+appearances stay fixed when reference players or filters change. Ineligible examples
+remain selectable so their unavailable inputs and exclusion reasons can be inspected.
 
 The interface uses version 2: passes, dribbles, provider-recorded duels and **Shots
 excluding blocks**, with visible feature contributions. Its 90-minute and two-appearance
@@ -105,7 +112,7 @@ in the local configuration.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-The example generates fictional IDs and statistics locally. No football dataset,
+The example generates fictional IDs and statistics locally. No provider dataset,
 credential or downloaded response is bundled. Keep runtime inputs under `data/`
 and generated outputs under `outputs/`; both are ignored by Git.
 
