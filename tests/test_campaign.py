@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 from examples.synthetic_demo import body, fixture
 from style_xi.acquire import daily_usage
-from style_xi.campaign import Campaign, COMPLETED, classification, inventory
+from style_xi.campaign import Campaign, COMPLETED, VALIDATION_FAILURE, classification, inventory
+from style_xi.profiles import build_profiles
 from style_xi.storage import DataError, atomic_json, exclusive, read_json
 
 TOKEN = "fictional-test-token"
@@ -296,6 +297,196 @@ class CampaignTests(unittest.TestCase):
         with self.assertRaisesRegex(DataError, "baseline_evidence_changed"):
             self.campaign.status()
         self.assertFalse(self.calls)
+
+    def quarantine_one(self):
+        def invalid(path, params, key):
+            status, headers, raw = self.transport(path, params, key)
+            if path.startswith("/box-score/"):
+                value = json.loads(raw)
+                del value[0]["players"][0]["statistics"]["interceptionsTotal"]
+                raw = json.dumps(value).encode()
+            return status, headers, raw
+        result = self.make(invalid).run(TOKEN)
+        self.assertEqual(result["stop_reason"], VALIDATION_FAILURE)
+        self.assertEqual(result["new_attempts"], 6)
+        self.failure = result["quarantine_failures"][0]
+        self.mid = self.failure["match_id"]
+        self.decision_path = self.root / "disposition.json"
+        self.decision = {"version": 1, "manifest_sha256": self.campaign.identity,
+                         "disposition": "continue_collection_keep_quarantined",
+                         "analytical_use_allowed": False, "failure": self.failure,
+                         "reason": "Retain the fictional invalid fixture for separate review."}
+        atomic_json(self.decision_path, self.decision)
+
+    def reviewed(self, transport=None):
+        return Campaign(self.path, collection_disposition=self.decision_path,
+                        transport=transport or (lambda *args: self.fail("transport must stay blocked")),
+                        sleeper=lambda _: None)
+
+    def test_missing_disposition_preserves_failure_and_excludes_whole_fixture(self):
+        self.quarantine_one()
+        before = {p: p.read_bytes() for p in (self.account, self.root / "state/requests.json",
+                                             self.root / "state/checkpoint.json")}
+        result = self.make(lambda *args: self.fail("no disposition")).run(TOKEN)
+        self.assertEqual(result["new_attempts"], 0)
+        self.assertEqual(result["stop_reason"], VALIDATION_FAILURE)
+        self.assertEqual(before, {p: p.read_bytes() for p in before})
+        imported = read_json(self.root / "state/import.json")
+        self.assertFalse(imported["player_matches"])
+        self.assertFalse(imported["sample_aggregates"])
+        self.assertTrue(any(r["reasons"] == ["fixture_quarantined"] for r in imported["excluded_records"]))
+        self.assertFalse(build_profiles(imported)["profiles"])
+
+    def test_exact_disposition_selects_read_only_then_resumes_without_releasing_quarantine(self):
+        self.quarantine_one()
+        holds = self.root / "holds.json"
+        atomic_json(holds, {"version": 1, "cases": {str(self.mid): {
+            "match_id": self.mid, "hold_scope": "match", "analytical_use_allowed": False}}})
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        call = self.reviewed().next_request()
+        self.assertNotEqual(call[2]["match_id"], self.mid)
+        self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()})
+        attempts = self.campaign.client.ledger()["attempts"]
+        result = self.reviewed(self.transport).run(TOKEN, max_new_attempts=1)
+        self.assertEqual(result["new_attempts"], 1)
+        self.assertEqual(result["stop_reason"], "invocation_attempt_limit")
+        self.assertEqual(result["halted"], VALIDATION_FAILURE)
+        self.assertIsNone(result["collection_blocker"])
+        self.assertEqual(result["quarantined_fixtures"], [self.mid])
+        self.assertEqual(result["collection_disposed_fixture"], self.mid)
+        self.assertTrue(result["real_comparison_readiness"].startswith("blocked_"))
+        self.assertEqual(self.campaign.client.ledger()["attempts"][:len(attempts)], attempts)
+        self.assertEqual(holds.read_bytes(), before[holds])
+        for path, raw in before.items():
+            if path.parent.name == "responses":
+                self.assertEqual(path.read_bytes(), raw)
+        imported = read_json(self.root / "state/import.json")
+        self.assertNotIn(self.mid, {r["match_id"] for r in imported["player_matches"]})
+        self.assertNotIn(self.mid, {mid for a in imported["sample_aggregates"] for mid in a["contributing_matches"]})
+        profiles = build_profiles(imported)
+        self.assertNotIn(self.mid, {mid for p in profiles["profiles"] for mid in p["contributing_match_ids"]})
+        self.assertEqual(self.make(lambda *args: self.fail("decision must be supplied again")).run(TOKEN)["new_attempts"], 0)
+
+    def test_mismatched_disposition_blocks_before_transport_and_can_be_corrected(self):
+        self.quarantine_one()
+        changes = [("manifest_sha256", "0" * 64), ("version", True),
+                   ("disposition", "release_for_analysis"), ("analytical_use_allowed", True),
+                   ("reason", ""), ("failure", {})]
+        for key in self.failure:
+            replacement = "wrong" if isinstance(self.failure[key], str) else self.failure[key] + 1
+            changes.append(("failure", {**self.failure, key: replacement}))
+        changes.append(("failure", {**self.failure, "season": True}))
+        before = self.campaign.client.ledger()
+        for key, value in changes:
+            with self.subTest(key=key, value=value):
+                atomic_json(self.decision_path, {**self.decision, key: value})
+                result = self.reviewed().run(TOKEN)
+                self.assertEqual(result["new_attempts"], 0)
+                self.assertEqual(result["stop_reason"], "collection_disposition_mismatch")
+                self.assertEqual(self.campaign.client.ledger(), before)
+        atomic_json(self.decision_path, self.decision)
+        self.assertIsNotNone(self.reviewed().next_request())
+
+    def test_unreadable_disposition_blocks_without_mutating_recorded_failure(self):
+        self.quarantine_one()
+        self.decision_path.unlink()
+        before = (self.root / "state/checkpoint.json").read_bytes()
+        result = self.reviewed().run(TOKEN)
+        self.assertEqual(result["stop_reason"], "collection_disposition_unreadable")
+        self.assertEqual(result["new_attempts"], 0)
+        self.assertEqual(before, (self.root / "state/checkpoint.json").read_bytes())
+
+    def test_second_invalid_fixture_is_not_covered_by_first_disposition(self):
+        self.quarantine_one()
+        def another_invalid(path, params, key):
+            status, headers, raw = self.transport(path, params, key)
+            value = json.loads(raw)
+            del value[0]["players"][0]["statistics"]["interceptionsTotal"]
+            return status, headers, json.dumps(value).encode()
+        result = self.reviewed(another_invalid).run(TOKEN)
+        self.assertEqual(result["new_attempts"], 1)
+        self.assertEqual(result["stop_reason"], VALIDATION_FAILURE)
+        self.assertEqual(len(result["quarantined_fixtures"]), 2)
+        self.assertEqual(self.reviewed().run(TOKEN)["new_attempts"], 0)
+
+    def test_disposition_cannot_waive_halts_in_any_control_file(self):
+        self.quarantine_one()
+        for path in (self.account, self.root / "state/requests.json", self.root / "state/checkpoint.json"):
+            original = path.read_bytes()
+            for halt in ("cache_integrity_failure", "quota_evidence_missing", "http_429",
+                         "uncertain_interrupted_request_requires_review", VALIDATION_FAILURE):
+                if path.name == "checkpoint.json" and halt == VALIDATION_FAILURE:
+                    continue
+                with self.subTest(path=path.name, halt=halt):
+                    atomic_json(path, {**json.loads(original), "halted": halt})
+                    result = self.reviewed().run(TOKEN)
+                    self.assertEqual(result["new_attempts"], 0)
+                    self.assertEqual(result["stop_reason"], halt)
+                    path.write_bytes(original)
+                    # Keep this test's independent stop cases independent.
+                    atomic_json(self.root / "state/checkpoint.json", {
+                        "manifest_sha256": self.campaign.identity, "halted": VALIDATION_FAILURE})
+
+    def test_disposition_does_not_bypass_fresh_quota_or_daily_allowance(self):
+        self.quarantine_one()
+        original = read_json(self.account)
+        for remaining in (0, 10):
+            with self.subTest(remaining=remaining):
+                atomic_json(self.account, {**original, "observation": {
+                    "observed_utc": datetime.now(timezone.utc).isoformat(), "remaining": remaining}})
+                result = self.reviewed().run(TOKEN)
+                self.assertEqual(result["new_attempts"], 0)
+                self.assertEqual(result["stop_reason"], "daily_account_budget_exhausted")
+        account = deepcopy(original)
+        account["observation"] = {"observed_utc": datetime.now(timezone.utc).isoformat(), "remaining": 11}
+        atomic_json(self.account, account)
+        def final_allowed(path, params, key):
+            self.remaining = 11
+            return self.transport(path, params, key)
+        result = self.reviewed(final_allowed).run(TOKEN)
+        self.assertEqual(result["new_attempts"], 1)
+        self.assertEqual(result["stop_reason"], "daily_account_budget_exhausted")
+
+    def test_disposition_does_not_bypass_uncertain_or_orphan_reservation(self):
+        self.quarantine_one()
+        account = read_json(self.account)
+        ledger = self.campaign.client.ledger()
+        a = {"number": len(ledger["attempts"]) + 1, "request_id": "unresolved-fictional-request",
+             "reserved_utc": datetime.now(timezone.utc).isoformat(), "outcome": "reserved",
+             "endpoint": "https://soccer.highlightly.net/box-score/90099999", "parameters": {},
+             "scope": {"competition_id": 900301, "season": 2025, "stage": "regular", "match_id": 90099999}}
+        account["attempts"].append({**a, "budget_id": self.campaign.client.budget_id})
+        atomic_json(self.account, account)
+        self.assertEqual(self.reviewed().run(TOKEN)["new_attempts"], 0)
+        ledger["attempts"].append(a)
+        atomic_json(self.root / "state/requests.json", ledger)
+        result = self.reviewed().run(TOKEN)
+        self.assertEqual(result["new_attempts"], 0)
+        self.assertEqual(result["uncertain_attempts"], 1)
+
+    def test_changed_response_or_failure_cannot_reuse_disposition(self):
+        self.quarantine_one()
+        attempt = self.campaign.client.ledger()["attempts"][-1]
+        path = next((self.root / "state/responses").glob(attempt["request_id"] + ".*.json"))
+        original = path.read_bytes()
+        envelope = read_json(path)
+        envelope["body"][1]["players"][0]["minutesPlayed"] = 42
+        atomic_json(path, envelope)
+        result = self.reviewed().run(TOKEN)
+        self.assertEqual(result["new_attempts"], 0)
+        self.assertTrue(result["workflow_halted"])
+        path.write_bytes(original)
+
+    def test_disposition_keeps_the_field_gate_closed(self):
+        self.quarantine_one()
+        gate = self.root / "gate.json"
+        atomic_json(gate, {"allow_box_scores": False})
+        campaign = self.reviewed()
+        # The real manifest remains anchored; emulate an existing mutable gate file.
+        campaign.manifest["validation_gate"] = str(gate)
+        result = campaign.run(TOKEN)
+        self.assertEqual(result["new_attempts"], 0)
+        self.assertEqual(result["stop_reason"], "field_validation_pause_before_box_collection")
 
 
 if __name__ == "__main__":
