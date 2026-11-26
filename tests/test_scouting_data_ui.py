@@ -19,6 +19,12 @@ def action(prefix, key):
     return prefix + "_" + "_".join(map(str, key))
 
 
+def control(app, key):
+    dataset = app.selectbox(key="dataset").value
+    widgets = app.text_input if key == "candidate_search" else app.selectbox
+    return widgets(key=f"{dataset}_{key}")
+
+
 def cards(app):
     markup = next(m.value for m in app.markdown if m.value.startswith('<div class="comparison-grid">'))
     return {card.find("h4").text: {row.find("dt").text: row.find("dd").text for row in card.findall("dl/div")}
@@ -45,7 +51,7 @@ class DatasetInterfaceTests(unittest.TestCase):
                 self.assertEqual(app.selectbox(key="dataset").value, dataset)
                 self.assertEqual(app.selectbox(key="dataset").options, list(BUNDLED_DATASETS.values()))
                 reference = document["fictional_example"]["default_reference"]
-                self.assertEqual(app.selectbox(key="query").value, identity(reference))
+                self.assertEqual(control(app, "query").value, identity(reference))
                 expected = rank_candidates(fit, document, reference, cohort["candidates"], limit=5)
                 headings = [ElementTree.fromstring(m.value).find("div/strong").text
                             for m in app.markdown if m.value.startswith('<div class="candidate-heading">')]
@@ -73,11 +79,11 @@ class DatasetInterfaceTests(unittest.TestCase):
                 before = download.call_args.kwargs["data"]
                 fit_before = digest(fit.metadata)
                 with patch("style_xi.scouting_data.fit_reference", side_effect=AssertionError("must keep the fixed fit")):
-                    app.text_input(key="candidate_search").set_value("no-fictional-match").run()
+                    control(app, "candidate_search").set_value("no-fictional-match").run()
                     self.assertTrue(any("No eligible candidates" in info.value for info in app.info))
                     self.assertEqual(app.session_state["saved_shortlist"], saved)
                     self.assertEqual(download.call_args.kwargs["data"], before)
-                    app.selectbox(key="query").set_value(saved[0]).run()
+                    control(app, "query").set_value(saved[0]).run()
                 expected = rank_candidates(fit, document, selector(profiles[saved[0]]),
                                            [selector(profiles[key]) for key in saved], limit=len(saved))
                 text = download.call_args.kwargs["data"]
@@ -108,9 +114,9 @@ class DatasetInterfaceTests(unittest.TestCase):
                 app = self.app(dataset)
                 self.assertFalse(any(b.key == action("add", key) for b in app.button))
                 with patch("style_xi.scouting_data.fit_reference", side_effect=AssertionError("filters must not refit")):
-                    app.selectbox(key="candidate_league").set_value(league).run()
-                    app.selectbox(key="candidate_position").set_value(position).run()
-                    app.text_input(key="candidate_search").set_value(search).run()
+                    control(app, "candidate_league").set_value(league).run()
+                    control(app, "candidate_position").set_value(position).run()
+                    control(app, "candidate_search").set_value(search).run()
                 self.assertTrue(any(b.key == action("add", key) for b in app.button))
                 self.assertEqual(len(app.exception), 0)
 
@@ -124,12 +130,14 @@ class DatasetInterfaceTests(unittest.TestCase):
                 key = identity(result["neighbours"][0]["candidate"]["identity"])
                 app.button(key=action("add", key)).click().run()
                 app.text_area(key=action("note", key)).set_value("This note belongs to " + current).run()
-                app.selectbox(key="query").set_value(key).run()
-                app.selectbox(key="candidate_league").set_value(reference["competition_id"]).run()
-                app.selectbox(key="candidate_position").set_value("Forward" if current == "lantern" else "Striker").run()
-                app.text_input(key="candidate_search").set_value("no-fictional-match").run()
+                control(app, "query").set_value(key).run()
+                control(app, "candidate_league").set_value(reference["competition_id"]).run()
+                control(app, "candidate_position").set_value("Forward" if current == "lantern" else "Striker").run()
+                control(app, "candidate_search").set_value("no-fictional-match").run()
                 revision = app.session_state["comparison_revision"]
                 download.reset_mock()
+                old_controls = {key: control(app, key).proto.id for key in (
+                    "query", "candidate_search", "candidate_league", "candidate_position")}
                 app.selectbox(key="dataset").set_value(other).run()
                 self.assertEqual(len(app.exception), 0)
                 self.assertEqual(app.session_state["saved_shortlist"], [])
@@ -137,11 +145,14 @@ class DatasetInterfaceTests(unittest.TestCase):
                 self.assertEqual(app.session_state["comparison_selection"], [])
                 self.assertGreater(app.session_state["comparison_revision"], revision)
                 self.assertNotIn(action("note", key), app.session_state)
-                self.assertIsNone(app.selectbox(key="candidate_league").value)
-                self.assertIsNone(app.selectbox(key="candidate_position").value)
-                self.assertEqual(app.text_input(key="candidate_search").value, "")
+                self.assertIsNone(control(app, "candidate_league").value)
+                self.assertIsNone(control(app, "candidate_position").value)
+                self.assertEqual(control(app, "candidate_search").value, "")
                 expected = identity(demo_data(other)[0]["fictional_example"]["default_reference"])
-                self.assertEqual(app.selectbox(key="query").value, expected)
+                self.assertEqual(control(app, "query").value, expected)
+                # Browser controls must remount with the new catalog's defaults.
+                for key, previous_id in old_controls.items():
+                    self.assertNotEqual(control(app, key).proto.id, previous_id, key)
                 download.assert_not_called()
 
     def test_malformed_bundled_data_shows_a_clear_error_and_stops_the_workflow(self):
@@ -151,7 +162,7 @@ class DatasetInterfaceTests(unittest.TestCase):
             app = AppTest.from_file(str(APP), default_timeout=20).run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual([error.value for error in app.error], [message])
-        self.assertFalse(any(widget.key == "query" for widget in app.selectbox))
+        self.assertFalse(any(widget.label == "Reference player" for widget in app.selectbox))
         download.assert_not_called()
 
 

@@ -119,12 +119,12 @@ class DiscoveryTests(unittest.TestCase):
             exported = download.call_args.kwargs["data"]
             fit_before = digest(self.fit.metadata)
             with patch("style_xi.scouting_data.fit_reference", side_effect=AssertionError("filter must not refit")):
-                app.selectbox(key="candidate_league").set_value(900302).run()
-                app.selectbox(key="candidate_position").set_value("Forward").run()
+                app.selectbox(key="lantern_candidate_league").set_value(900302).run()
+                app.selectbox(key="lantern_candidate_position").set_value("Forward").run()
                 self.assertEqual([b.label for b in app.button if b.key.startswith("add_")], ["Add Ivo Vale"])
-                app.selectbox(key="candidate_position").set_value("Midfielder").run()
+                app.selectbox(key="lantern_candidate_position").set_value("Midfielder").run()
                 self.assertTrue(any("No eligible candidates" in info.value for info in app.info))
-                app.text_input(key="candidate_search").set_value("no-invented-match").run()
+                app.text_input(key="lantern_candidate_search").set_value("no-invented-match").run()
             self.assertEqual(len(app.exception), 0)
             self.assertEqual(app.session_state["saved_shortlist"], saved)
             self.assertEqual(app.text_area(key=action("note", 901202)).value, "Keep this saved note.")

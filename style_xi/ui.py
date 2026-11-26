@@ -218,8 +218,9 @@ def _clear_shortlist():
 
 def _change_dataset():
     _clear_shortlist()
-    for key in ("query", "candidate_search", "candidate_league", "candidate_position"):
-        st.session_state.pop(key, None)
+    for dataset_id in BUNDLED_DATASETS:
+        for key in ("query", "candidate_search", "candidate_league", "candidate_position"):
+            st.session_state.pop(f"{dataset_id}_{key}", None)
 
 
 def _save_shortlist_note(key, widget_key):
@@ -448,11 +449,12 @@ def render_app():
     profiles = {identity(selector(p)): p for p in document["profiles"]}
     choices = sorted(profiles, key=lambda key: profile_label(profiles[key]))
     default = identity(document["fictional_example"]["default_reference"])
+    # Distinct widget identities reset browser labels as well as server values.
     with st.container(key="reference_strip"):
         picker, summary = st.columns([3, 2], vertical_alignment="bottom")
         with picker:
             selected = st.selectbox("Reference player", choices, index=choices.index(default),
-                                    format_func=lambda key: profile_label(profiles[key]), key="query")
+                                    format_func=lambda key: profile_label(profiles[key]), key=f"{dataset_id}_query")
         profile = profiles[selected]
         with summary:
             label = "appearance" if profile["accepted_appearances"] == 1 else "appearances"
@@ -462,7 +464,7 @@ def render_app():
     with st.container(key="candidate_toolbar"):
         search_column, count_column = st.columns([4, 1], vertical_alignment="bottom")
         with search_column:
-            search = st.text_input("Search candidates", key="candidate_search", placeholder="Player or club name").strip().casefold()
+            search = st.text_input("Search candidates", key=f"{dataset_id}_candidate_search", placeholder="Player or club name").strip().casefold()
         with count_column:
             st.markdown(f"[Shortlist · {len(st.session_state.saved_shortlist)}](#session-shortlist)")
     with st.container(key="candidate_filters"):
@@ -473,11 +475,11 @@ def render_app():
             positions.append("Unavailable")
         with league_column:
             league = st.selectbox("League", [None, *sorted(leagues)], format_func=lambda lid: "All leagues" if lid is None else leagues[lid],
-                                  key="candidate_league")
+                                  key=f"{dataset_id}_candidate_league")
         with position_column:
             position = st.selectbox("Observed position", [None, *positions],
                                     format_func=lambda label: "All observed positions" if label is None else label,
-                                    key="candidate_position")
+                                    key=f"{dataset_id}_candidate_position")
     candidates = discovery_candidates(profiles, cohort["candidates"], search=search, league=league, position=position)
     result = rank_candidates(fit, document, selector(profile), candidates, limit=5)
     with reference_details:

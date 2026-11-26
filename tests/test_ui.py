@@ -58,7 +58,7 @@ class InterfaceTests(unittest.TestCase):
         self.assertIn("all four v2 rates complete", app.caption[0].value)
         self.assertTrue(any("Real-player analysis gated" in m.value for m in app.markdown))
         self.assertEqual(len(app.selectbox), 4)
-        self.assertEqual(len(app.selectbox(key="query").options), 14)
+        self.assertEqual(len(app.selectbox(key="lantern_query").options), 14)
         reference = details(app, "Reference stats and method")
         self.assertFalse(reference.proto.expanded)
         # All full numeric tables belong to collapsed reference/candidate details.
@@ -99,7 +99,7 @@ class InterfaceTests(unittest.TestCase):
                       "highlightly/900301/2025/playoff/900101/901201"):
             with self.subTest(token=token):
                 app = self.app()
-                app.selectbox(key="query").set_value(tuple(parse_selector(token).values())).run()
+                app.selectbox(key="lantern_query").set_value(tuple(parse_selector(token).values())).run()
                 self.assertEqual(len(app.exception), 0)
                 self.assertTrue(app.warning)
                 self.assertFalse(any(b.key.startswith("add_") for b in app.button))
@@ -152,7 +152,7 @@ class InterfaceTests(unittest.TestCase):
         for player in (901202, 901205, 901203):
             app.button(key=action_key("add", player)).click().run()
         self.assertEqual(len(comparison_cards(app)), 4)
-        app.selectbox(key="query").set_value(profile_key(901202)).run()
+        app.selectbox(key="lantern_query").set_value(profile_key(901202)).run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["saved_shortlist"], saved)
         self.assertTrue(any("Shortlist · 3" in m.value for m in app.markdown))
@@ -174,7 +174,7 @@ class InterfaceTests(unittest.TestCase):
         app.button(key=action_key("add", 901202)).click().run()
         for search in ("Rumi", "Sable", "no-such-fictional-player"):
             with self.subTest(search=search):
-                app.text_input(key="candidate_search").set_value(search).run()
+                app.text_input(key="lantern_candidate_search").set_value(search).run()
                 self.assertEqual(len(app.exception), 0)
                 self.assertTrue(any("No eligible candidates" in i.value for i in app.info))
                 self.assertEqual(app.session_state["saved_shortlist"], [profile_key(901202)])
@@ -187,14 +187,14 @@ class InterfaceTests(unittest.TestCase):
                     reasons = " ".join(m.value for m in app.markdown)
                     self.assertIn("Fewer than 90", reasons)
                     self.assertIn("Fewer than two", reasons)
-        app.text_input(key="candidate_search").set_value("  MOSSBRIDGE  ").run()
+        app.text_input(key="lantern_candidate_search").set_value("  MOSSBRIDGE  ").run()
         self.assertEqual(len([b for b in app.button if b.key.startswith("add_")]), 5)
         self.assertEqual(app.session_state["saved_shortlist"], [profile_key(901202)])
 
     def test_ineligible_reference_keeps_shortlist_rates_without_stale_distances(self):
         app = self.app()
         app.button(key=action_key("add", 901202)).click().run()
-        app.selectbox(key="query").set_value(profile_key(901207)).run()
+        app.selectbox(key="lantern_query").set_value(profile_key(901207)).run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["saved_shortlist"], [profile_key(901202)])
         cards = comparison_cards(app)
@@ -244,10 +244,10 @@ class InterfaceTests(unittest.TestCase):
         self.assertEqual(app.text_area(key=action_key("note", 901202)).proto.max_chars, MAX_NOTE_LENGTH)
         self.assertEqual(comparison_cards(app)["Pax Ember"]["Distance from reference"], before_distance)
         for reference in (901202, 901207):
-            app.selectbox(key="query").set_value(profile_key(reference)).run()
+            app.selectbox(key="lantern_query").set_value(profile_key(reference)).run()
             self.assertEqual(app.text_area(key=action_key("note", 901202)).value, edited)
             self.assertEqual(app.text_area(key=action_key("note", 901205)).value, "More shots; keep for a second look.")
-        app.text_input(key="candidate_search").set_value("no-such-fictional-player").run()
+        app.text_input(key="lantern_candidate_search").set_value("no-such-fictional-player").run()
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(app.session_state["shortlist_notes"][mira], edited)
         self.assertEqual(digest(demo_data()[2].metadata), before_fit)
